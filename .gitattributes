@@ -1,0 +1,4 @@
+# Normalize line endings and keep scripts/docs on LF
+* text=auto
+*.sh text eol=lf
+*.md text eol=lf
