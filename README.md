@@ -1,102 +1,91 @@
-# PowerShell Installer for macOS
+# PowerShell Upstall (macOS / Linux / Windows)
 
-> The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell). This script installs PowerShell on macOS, automatically selecting the correct Apple Silicon (arm64) or Intel (x64) package from the official GitHub Releases.
+> The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell). These scripts install or update PowerShell directly from the official GitHub Releases, auto-selecting the right package for your OS and CPU architecture.
 
-This script downloads and installs **Microsoft PowerShell** on **macOS**, detecting your architecture and pulling the matching installer directly from the [official GitHub Releases](https://github.com/powershell/powershell/releases).
+This repo provides platform-specific upstall scripts:
+
+- `upstall-pwsh-macos.sh` (Bash): macOS installer/updater for Apple Silicon and Intel using the official `.pkg`.
+- `upstall-pwsh-linux.sh` (POSIX sh): Linux installer/updater using release tarballs; detects glibc vs musl (Alpine) and `x64`/`arm64`.
+- `upstall-pwsh-windows.ps1` (PowerShell): Windows installer/updater using the official MSI; works from PowerShell 5.1 or 7+.
 
 ## Requirements
 
-- macOS 13+ (tested on macOS Tahoe 26.1)
-- Apple Silicon (`arm64`) or Intel (`x86_64`)
-- `curl`
-- `pkgutil`
-- `installer`
-- `python3` (or `python`)
-- `sudo` access (for installation/uninstall)
+- Common: `curl`, internet access to GitHub Releases.
+- macOS: macOS 13+, `pkgutil`, `installer`, `python3` (or `python`), sudo access.
+- Linux: `/bin/sh`, `curl`, `tar`, `python3` (or `python`), sudo/root. Works with glibc and musl-based distros (including Alpine) on `x86_64` and `arm64`.
+- Windows: PowerShell 5.1+ or 7+, `msiexec`. Run from an elevated session for install/upgrade.
 
-## Usage
+## macOS
 
 ```bash
 ./upstall-pwsh-macos.sh [options]
 ```
 
-If the target version is already installed, the script exits without reinstalling unless `--force` is used.
-Use `--uninstall` to remove the default PowerShell install created by this script.
+Options: `--tag <tag>`, `--out-dir <dir>`, `--keep-pkg`, `--force`, `--uninstall`, `-n|--dry-run`, `-h|--help`.
 
-### Options
-
-| Option            | Description                                               |
-| ----------------- | --------------------------------------------------------- |
-| `--tag <tag>`     | Install a specific GitHub release tag (e.g. `v7.5.4`)     |
-| `--out-dir <dir>` | Directory to save the downloaded `.pkg`                   |
-| `--keep-pkg`      | Keep the downloaded `.pkg` after installation             |
-| `--force`         | Reinstall even if the target version is already installed |
-| `--uninstall`     | Uninstall PowerShell from the default install location    |
-| `-n`, `--dry-run` | Show what would happen without downloading or installing  |
-| `-h`, `--help`    | Show help                                                 |
-
-## Examples
-
-### Install the latest stable PowerShell
+Examples:
 
 ```bash
 ./upstall-pwsh-macos.sh
-```
-
-### Install a specific version
-
-```bash
 ./upstall-pwsh-macos.sh --tag v7.5.4
-```
-
-### Reinstall even if already on the target version
-
-```bash
 ./upstall-pwsh-macos.sh --force
-```
-
-### Uninstall PowerShell
-
-```bash
 ./upstall-pwsh-macos.sh --uninstall
-```
-
-### Preview actions only (no download, no sudo)
-
-```bash
 ./upstall-pwsh-macos.sh --dry-run
 ```
 
-### Download to `~/Downloads` and keep the package
+## Linux
 
 ```bash
-./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep-pkg
+./upstall-pwsh-linux.sh [options]
 ```
 
-## What the script does
+Options: `--tag <tag>`, `--out-dir <dir>`, `--keep-tar`, `--force`, `--uninstall`, `-n|--dry-run`, `-h|--help`.
 
-1. Queries the PowerShell GitHub Releases API
-2. Detects your architecture and selects the official `osx-arm64.pkg` or `osx-x64.pkg`
-3. Downloads the package
-4. Verifies the installer signature:
-5. Installs PowerShell using `sudo installer -pkg <pkg> -target /`
-6. Verifies `pwsh` is available and prints the version
+Examples:
 
-> With `--uninstall`, it removes `/usr/local/microsoft/powershell` and the `/usr/local/bin/pwsh` symlink, and forgets any PowerShell package receipts it finds.
-
-## Install location
-
-PowerShell is installed to:
-
-```plaintext
-/usr/local/microsoft/powershell/7/
+```bash
+./upstall-pwsh-linux.sh
+./upstall-pwsh-linux.sh --tag v7.5.4
+./upstall-pwsh-linux.sh --force
+./upstall-pwsh-linux.sh --uninstall
+./upstall-pwsh-linux.sh --dry-run
 ```
 
-The `pwsh` binary is symlinked into:
+Notes:
+- Detects `x64` vs `arm64` and glibc vs musl to pick `linux-<arch>.tar.gz` or `linux-musl-<arch>.tar.gz`.
+- Installs to `/usr/local/microsoft/powershell/<version>` and symlinks `/usr/local/bin/pwsh`.
+- No Bash required; works with `/bin/sh` (including Alpine's `ash`).
 
-```plaintext
-/usr/local/bin/pwsh
+## Windows
+
+```powershell
+pwsh -File .\upstall-pwsh-windows.ps1 [-Tag v7.5.4] [-OutDir <path>] [-KeepInstaller] [-Force] [-Uninstall] [-WhatIf]
 ```
+
+Notes:
+- Detects `x64` vs `arm64` and picks the matching `win-<arch>.msi`.
+- Run from an elevated PowerShell session (7+ or Windows PowerShell 5.1). The MSI supports in-place upgrades even when launched from PowerShell 7; you do not need to switch to Windows PowerShell 5.1, though the installer may prompt you to close running `pwsh` instances.
+- `-Uninstall` uses the MSI uninstall entry discovered in the registry; run elevated.
+- Default install location is the standard MSI path under `Program Files\PowerShell\7`.
+
+Examples:
+
+```powershell
+pwsh -File .\upstall-pwsh-windows.ps1
+pwsh -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
+pwsh -File .\upstall-pwsh-windows.ps1 -Uninstall
+```
+
+## What the scripts do
+
+- Query the PowerShell GitHub Releases API (latest or specific tag).
+- Auto-select the correct asset for your platform/arch:
+  - macOS: `osx-arm64.pkg` or `osx-x64.pkg`
+  - Linux: `linux-<arch>.tar.gz` or `linux-musl-<arch>.tar.gz`
+  - Windows: `win-<arch>.msi`
+- Download, install/upgrade, and skip reinstalling if the target version is already present unless forced.
+- macOS/Linux: optional uninstall removes the install directory and the `pwsh` symlink.
+- Post-install, verifies `pwsh` availability (macOS/Linux) or prints a completion message (Windows).
 
 ## License
 

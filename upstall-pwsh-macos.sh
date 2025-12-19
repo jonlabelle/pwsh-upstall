@@ -67,7 +67,7 @@ run() {
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     log "[dry-run] $*"
   else
-    eval "$@"
+    "$@"
   fi
 }
 
@@ -85,7 +85,7 @@ uninstall_pwsh() {
 
   if [[ -d "${target_root}" ]]; then
     log "Uninstalling PowerShell from: ${target_root}"
-    run "sudo rm -rf \"${target_root}\""
+    run sudo rm -rf "${target_root}"
     removed_any=1
   else
     log "No PowerShell install found at: ${target_root}"
@@ -96,7 +96,7 @@ uninstall_pwsh() {
     link_target="$(readlink "${pwsh_link}" 2>/dev/null || true)"
     if [[ "${link_target}" == *"microsoft/powershell/"* ]]; then
       log "Removing symlink: ${pwsh_link}"
-      run "sudo rm -f \"${pwsh_link}\""
+      run sudo rm -f "${pwsh_link}"
       removed_any=1
     fi
   fi
@@ -108,13 +108,18 @@ uninstall_pwsh() {
       while IFS= read -r pkg; do
         [[ -z "${pkg}" ]] && continue
         log "Forgetting package receipt: ${pkg}"
-        run "sudo pkgutil --forget \"${pkg}\""
+        run sudo pkgutil --forget "${pkg}"
       done <<<"${pkg_ids}"
     fi
   fi
 
-  run "sudo rmdir \"/usr/local/microsoft/powershell\" 2>/dev/null || true"
-  run "sudo rmdir \"/usr/local/microsoft\" 2>/dev/null || true"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "[dry-run] sudo rmdir \"/usr/local/microsoft/powershell\" (ignore failures)"
+    log "[dry-run] sudo rmdir \"/usr/local/microsoft\" (ignore failures)"
+  else
+    sudo rmdir "/usr/local/microsoft/powershell" 2>/dev/null || true
+    sudo rmdir "/usr/local/microsoft" 2>/dev/null || true
+  fi
 
   if [[ "${removed_any}" -eq 1 ]]; then
     log "Uninstall complete."
@@ -263,6 +268,7 @@ log "Download URL: ${PKG_URL}"
 if [[ "${FORCE}" -eq 0 ]]; then
   INSTALLED_VERSION=""
   if command -v pwsh >/dev/null 2>&1; then
+    # shellcheck disable=SC2016
     INSTALLED_VERSION="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
   fi
 
@@ -310,20 +316,21 @@ PKG_PATH="${DL_DIR%/}/${PKG_NAME}"
 
 # Download
 log "Downloading to: ${PKG_PATH}"
-run "curl -fL --retry 3 --retry-delay 2 -o \"${PKG_PATH}\" \"${PKG_URL}\""
+run curl -fL --retry 3 --retry-delay 2 -o "${PKG_PATH}" "${PKG_URL}"
 
 # Verify installer signature (Gatekeeper-style signature check for .pkg)
 log "Checking package signature (pkgutil --check-signature)…"
-run "pkgutil --check-signature \"${PKG_PATH}\""
+run pkgutil --check-signature "${PKG_PATH}"
 
 # Install
 log "Installing PowerShell (requires sudo)…"
-run "sudo installer -pkg \"${PKG_PATH}\" -target /"
+run sudo installer -pkg "${PKG_PATH}" -target /
 
 # Verify
 log "Verifying installation…"
-run "command -v pwsh"
-run "pwsh -NoLogo -NoProfile -Command '\$PSVersionTable.PSVersion'"
+run command -v pwsh
+# shellcheck disable=SC2016
+run pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion'
 
 # Cleanup
 if [[ "${KEEP_PKG}" -eq 1 || -n "${OUT_DIR}" ]]; then
@@ -331,7 +338,7 @@ if [[ "${KEEP_PKG}" -eq 1 || -n "${OUT_DIR}" ]]; then
 else
   if [[ -n "${TMP_DIR}" ]]; then
     log "Cleaning up temporary files…"
-    run "rm -rf \"${TMP_DIR}\""
+    run rm -rf "${TMP_DIR}"
   else
     # If temp dir wasn't created (e.g. dry-run), do nothing
     :

@@ -1,0 +1,284 @@
+#!/usr/bin/env sh
+set -eu
+
+# upstall-pwsh-linux.sh
+#
+# POSIX shell script to update/install Microsoft PowerShell on Linux using the
+# official GitHub release tarballs. Works on glibc and musl (e.g., Alpine) and
+# uses only /bin/sh plus curl, tar, and python3.
+
+REPO_OWNER="PowerShell"
+REPO_NAME="PowerShell"
+API_BASE="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
+
+DRY_RUN=0
+TAG=""     # e.g., v7.5.4
+OUT_DIR="" # destination directory for the downloaded tarball
+KEEP_TAR=0
+FORCE=0
+UNINSTALL=0
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  upstall-pwsh-linux.sh [options]
+
+Options:
+  --tag <tag>        Install a specific GitHub release tag (e.g., v7.5.4).
+                     If omitted, installs the latest stable release.
+  --out-dir <dir>    Directory to save the downloaded tarball (default: temp dir).
+  --keep-tar         Keep the downloaded tarball after installation (default: delete unless --out-dir is used).
+  --force            Reinstall even if the target version is already installed.
+  --uninstall        Remove PowerShell from the default install location.
+  -n, --dry-run      Show what would happen, but do not download or install.
+  -h, --help         Show help.
+
+Examples:
+  # Install latest stable PowerShell
+  ./upstall-pwsh-linux.sh
+
+  # Install a specific version
+  ./upstall-pwsh-linux.sh --tag v7.5.4
+
+  # Preview actions only
+  ./upstall-pwsh-linux.sh --dry-run
+
+  # Reinstall even if already on the target version
+  ./upstall-pwsh-linux.sh --force
+
+  # Uninstall PowerShell
+  ./upstall-pwsh-linux.sh --uninstall
+USAGE
+}
+
+log() { printf '%s\n' "$*"; }
+run() {
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "[dry-run] $*"
+  else
+    "$@"
+  fi
+}
+
+need_cmd() {
+  if ! command -v "${1}" >/dev/null 2>&1; then
+    echo "ERROR: missing required command: ${1}" >&2
+    exit 1
+  fi
+}
+
+while [ $# -gt 0 ]; do
+  case "${1}" in
+  --tag)
+    TAG="${2:-}"
+    shift 2
+    ;;
+  --out-dir)
+    OUT_DIR="${2:-}"
+    shift 2
+    ;;
+  --keep-tar)
+    KEEP_TAR=1
+    shift
+    ;;
+  --force)
+    FORCE=1
+    shift
+    ;;
+  --uninstall)
+    UNINSTALL=1
+    shift
+    ;;
+  -n | --dry-run)
+    DRY_RUN=1
+    shift
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "Unknown argument: ${1}" >&2
+    usage
+    exit 1
+    ;;
+  esac
+done
+
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+  if command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+  else
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      SUDO="sudo"
+    else
+      echo "ERROR: this script needs root privileges (installing to /usr/local). Please run as root or install sudo." >&2
+      exit 1
+    fi
+  fi
+fi
+
+need_cmd uname
+need_cmd curl
+need_cmd tar
+
+if [ "${UNINSTALL}" -eq 1 ]; then
+  INSTALL_ROOT="/usr/local/microsoft/powershell"
+  if [ -d "${INSTALL_ROOT}" ]; then
+    log "Removing ${INSTALL_ROOT}"
+    run ${SUDO}rm -rf "${INSTALL_ROOT}"
+  else
+    log "No PowerShell install found at ${INSTALL_ROOT}"
+  fi
+  if [ -L "/usr/local/bin/pwsh" ]; then
+    log "Removing /usr/local/bin/pwsh"
+    run ${SUDO}rm -f "/usr/local/bin/pwsh"
+  fi
+  log "Uninstall complete."
+  exit 0
+fi
+
+ARCH="$(uname -m)"
+case "${ARCH}" in
+  x86_64) PKG_ARCH="x64" ;;
+  aarch64 | arm64) PKG_ARCH="arm64" ;;
+  *)
+    echo "ERROR: Unsupported architecture: ${ARCH} (expected x86_64 or arm64)." >&2
+    exit 1
+    ;;
+esac
+
+MUSL=0
+if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then
+  MUSL=1
+fi
+
+if [ "${MUSL}" -eq 1 ]; then
+  TARGET_SUFFIX="linux-musl-${PKG_ARCH}.tar.gz"
+else
+  TARGET_SUFFIX="linux-${PKG_ARCH}.tar.gz"
+fi
+
+PYTHON=""
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON="python"
+else
+  echo "ERROR: python3 (or python) is required to parse GitHub release JSON." >&2
+  exit 1
+fi
+
+if [ -n "${TAG}" ]; then
+  RELEASE_URL="${API_BASE}/releases/tags/${TAG}"
+else
+  RELEASE_URL="${API_BASE}/releases/latest"
+fi
+
+log "Fetching release metadata: ${RELEASE_URL}"
+JSON="$(curl -fsSL "${RELEASE_URL}")"
+
+REL_DATA="$(
+  "${PYTHON}" - "${JSON}" "${TARGET_SUFFIX}" <<'PY'
+import json, sys, re
+data = json.loads(sys.argv[1])
+target = sys.argv[2]
+
+tag = data.get("tag_name") or ""
+assets = data.get("assets") or []
+candidates = []
+for a in assets:
+    name = a.get("name") or ""
+    url = a.get("browser_download_url") or ""
+    if target in name and name.endswith(".tar.gz"):
+        candidates.append((name, url))
+
+def score(item):
+    name, _ = item
+    w = 0
+    if "preview" in name.lower(): w -= 10
+    if "rc" in name.lower(): w -= 5
+    if re.match(rf"^powershell-.*-{re.escape(target)}$", name): w += 5
+    return w
+
+candidates.sort(key=score, reverse=True)
+if candidates:
+    name, url = candidates[0]
+    print(tag, url, name)
+else:
+    print(tag, "", "")
+PY
+)"
+
+REL_TAG=$(printf '%s\n' "${REL_DATA}" | awk '{print $1}')
+PKG_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $2}')
+PKG_NAME=$(printf '%s\n' "${REL_DATA}" | awk '{print $3}')
+
+if [ -z "${PKG_URL}" ]; then
+  echo "ERROR: Could not find a ${TARGET_SUFFIX} asset in that release." >&2
+  exit 1
+fi
+
+log "Selected PowerShell release: ${REL_TAG:-<unknown tag>}"
+log "Selected package: ${PKG_NAME}"
+log "Download URL: ${PKG_URL}"
+
+INSTALLED_VERSION=""
+if command -v pwsh >/dev/null 2>&1; then
+  # shellcheck disable=SC2016
+  INSTALLED_VERSION="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
+fi
+
+if [ "${FORCE}" -eq 0 ] && [ -n "${REL_TAG}" ] && [ -n "${INSTALLED_VERSION}" ]; then
+  DESIRED_VERSION="${REL_TAG#v}"
+  if [ -n "${DESIRED_VERSION}" ] && [ "${INSTALLED_VERSION}" = "${DESIRED_VERSION}" ]; then
+    log "PowerShell ${INSTALLED_VERSION} is already installed; use --force to reinstall."
+    exit 0
+  fi
+fi
+
+if [ "${DRY_RUN}" -eq 1 ]; then
+  log "Dry-run summary:"
+  log "  Would download: ${PKG_URL}"
+  log "  Would install : ${PKG_NAME}"
+  log "  Target arch   : ${PKG_ARCH} (musl=${MUSL})"
+  log "  Would install to /usr/local/microsoft/powershell/<version>"
+  exit 0
+fi
+
+TMP_DIR=""
+if [ -n "${OUT_DIR}" ]; then
+  run mkdir -p "${OUT_DIR}"
+  DL_DIR="${OUT_DIR}"
+else
+  TMP_DIR="$(mktemp -d)"
+  DL_DIR="${TMP_DIR}"
+fi
+
+PKG_PATH="${DL_DIR%/}/${PKG_NAME}"
+
+log "Downloading to: ${PKG_PATH}"
+run curl -fL --retry 3 --retry-delay 2 -o "${PKG_PATH}" "${PKG_URL}"
+
+DESIRED_VERSION="${REL_TAG#v}"
+INSTALL_ROOT="/usr/local/microsoft/powershell"
+INSTALL_PATH="${INSTALL_ROOT}/${DESIRED_VERSION}"
+
+run ${SUDO}mkdir -p "${INSTALL_PATH}"
+log "Extracting to: ${INSTALL_PATH}"
+run ${SUDO}tar -xzf "${PKG_PATH}" -C "${INSTALL_PATH}"
+
+log "Linking pwsh to /usr/local/bin/pwsh"
+run ${SUDO}ln -sfn "${INSTALL_PATH}/pwsh" "/usr/local/bin/pwsh"
+
+if [ "${KEEP_TAR}" -eq 1 ] || [ -n "${OUT_DIR}" ]; then
+  log "Keeping tarball at: ${PKG_PATH}"
+else
+  if [ -n "${TMP_DIR}" ]; then
+    log "Cleaning up temporary files…"
+    run rm -rf "${TMP_DIR}"
+  fi
+fi
+
+log "Done. Verify with: pwsh -v"
