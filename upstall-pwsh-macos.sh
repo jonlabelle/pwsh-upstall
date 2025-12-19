@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# install-pwsh-macos.sh
+# upstall-pwsh-macos.sh
 #
 # Downloads and installs Microsoft PowerShell for macOS (arm64 or x64) from GitHub Releases.
 #
@@ -29,7 +29,7 @@ UNINSTALL=0
 usage() {
   cat <<'USAGE'
 Usage:
-  install-pwsh-macos.sh [options]
+  upstall-pwsh-macos.sh [options]
 
 Options:
   --tag <tag>        Install a specific GitHub release tag (e.g., v7.5.4).
@@ -43,22 +43,22 @@ Options:
 
 Examples:
   # Install latest stable PowerShell
-  ./install-pwsh-macos.sh
+  ./upstall-pwsh-macos.sh
 
   # Install a specific version
-  ./install-pwsh-macos.sh --tag v7.5.4
+  ./upstall-pwsh-macos.sh --tag v7.5.4
 
   # Download to ~/Downloads and keep the package
-  ./install-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep-pkg
+  ./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep-pkg
 
   # Preview actions only
-  ./install-pwsh-macos.sh --dry-run
+  ./upstall-pwsh-macos.sh --dry-run
 
   # Reinstall even if already on the target version
-  ./install-pwsh-macos.sh --force
+  ./upstall-pwsh-macos.sh --force
 
   # Uninstall PowerShell
-  ./install-pwsh-macos.sh --uninstall
+  ./upstall-pwsh-macos.sh --uninstall
 USAGE
 }
 

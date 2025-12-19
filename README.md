@@ -17,7 +17,7 @@ This script downloads and installs **Microsoft PowerShell** on **macOS**, detect
 ## Usage
 
 ```bash
-./install-pwsh-macos.sh [options]
+./upstall-pwsh-macos.sh [options]
 ```
 
 If the target version is already installed, the script exits without reinstalling unless `--force` is used.
@@ -40,37 +40,37 @@ Use `--uninstall` to remove the default PowerShell install created by this scrip
 ### Install the latest stable PowerShell
 
 ```bash
-./install-pwsh-macos.sh
+./upstall-pwsh-macos.sh
 ```
 
 ### Install a specific version
 
 ```bash
-./install-pwsh-macos.sh --tag v7.5.4
+./upstall-pwsh-macos.sh --tag v7.5.4
 ```
 
 ### Reinstall even if already on the target version
 
 ```bash
-./install-pwsh-macos.sh --force
+./upstall-pwsh-macos.sh --force
 ```
 
 ### Uninstall PowerShell
 
 ```bash
-./install-pwsh-macos.sh --uninstall
+./upstall-pwsh-macos.sh --uninstall
 ```
 
 ### Preview actions only (no download, no sudo)
 
 ```bash
-./install-pwsh-macos.sh --dry-run
+./upstall-pwsh-macos.sh --dry-run
 ```
 
 ### Download to `~/Downloads` and keep the package
 
 ```bash
-./install-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep-pkg
+./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep-pkg
 ```
 
 ## What the script does
