@@ -1,6 +1,8 @@
-# PowerShell Upstall (macOS / Linux / Windows)
+# PowerShell Core Upstall Scripts
 
-This repo provides platform-specific upstall scripts:
+[![ci](https://github.com/jonlabelle/pwsh-upstall/actions/workflows/ci.yml/badge.svg)](https://github.com/jonlabelle/pwsh-upstall/actions/workflows/ci.yml)
+
+> This repo provides platform-specific upstall (update/install) scripts for PowerShell Core.
 
 - `upstall-pwsh-macos.sh` (Bash): macOS installer/updater for Apple Silicon and Intel using the official `.pkg`.
 - `upstall-pwsh-linux.sh` (POSIX sh): Linux installer/updater using release tarballs; detects glibc vs musl (Alpine) and `x64`/`arm64`.

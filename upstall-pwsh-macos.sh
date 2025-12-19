@@ -130,8 +130,8 @@ compare_versions() {
 
   "${PYTHON}" - "${v1}" "${v2}" <<'PY'
 import sys
-from packaging import version
 try:
+    from packaging import version
     v1 = version.parse(sys.argv[1])
     v2 = version.parse(sys.argv[2])
     if v1 == v2:
@@ -140,8 +140,16 @@ try:
         sys.exit(1)
     else:
         sys.exit(2)
-except:
-    # Fallback to string comparison
+except ImportError:
+    # Fallback to string comparison if packaging module not available
+    if sys.argv[1] == sys.argv[2]:
+        sys.exit(0)
+    elif sys.argv[1] < sys.argv[2]:
+        sys.exit(1)
+    else:
+        sys.exit(2)
+except Exception:
+    # Fallback to string comparison on any other error
     if sys.argv[1] == sys.argv[2]:
         sys.exit(0)
     elif sys.argv[1] < sys.argv[2]:

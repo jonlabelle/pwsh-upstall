@@ -217,7 +217,7 @@ if (-not $Uninstall)
 if ($Uninstall)
 {
     $info = Get-PwshUninstallInfo
-    if (-not $info)
+    if (-not $info -or -not $info.DisplayName -or -not $info.UninstallString)
     {
         Write-Host 'No PowerShell install found via MSI uninstall entries.' -ForegroundColor Yellow
         return
