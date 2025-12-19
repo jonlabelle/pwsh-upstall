@@ -8,81 +8,122 @@ Platform-specific scripts to install/update PowerShell Core from GitHub releases
 - **Linux**: `upstall-pwsh-linux.sh` — x64/arm64, glibc/musl (Alpine)
 - **Windows**: `upstall-pwsh-windows.ps1` — x64/arm64
 
-<details>
-<summary>Requirements & Security Features</summary>
-
-**Requirements**: `curl`, internet access, 500MB+ disk space, sudo/admin privileges.
-
-**Security**: SHA256 verification, signature validation (macOS), network pre-checks, disk space validation.
-
-</details>
-
 ## Usage
 
 ### macOS
 
 ```bash
-./upstall-pwsh-macos.sh                 # Install/update latest
-./upstall-pwsh-macos.sh --tag v7.5.4   # Specific version
-./upstall-pwsh-macos.sh --uninstall    # Remove
+# Install/update latest
+./upstall-pwsh-macos.sh
+
+# Specific version
+./upstall-pwsh-macos.sh --tag v7.5.4
+
+# Remove
+./upstall-pwsh-macos.sh --uninstall
 ```
 
 <details>
-<summary>Options & Notes</summary>
+<summary>Options</summary>
 
-Options: `--tag`, `--out-dir`, `--keep-pkg`, `--force`, `--uninstall`, `--skip-checksum`, `-n|--dry-run`, `-h|--help`
+| Option            | Description                                     |
+| ----------------- | ----------------------------------------------- |
+| `--tag <tag>`     | Install specific release version (e.g., v7.5.4) |
+| `--out-dir <dir>` | Save downloaded package to specified directory  |
+| `--keep-pkg`      | Keep the .pkg file after installation           |
+| `--force`         | Reinstall even if version already installed     |
+| `--uninstall`     | Remove PowerShell installation                  |
+| `--skip-checksum` | Skip SHA256 verification (not recommended)      |
+| `-n, --dry-run`   | Show what would happen without executing        |
+| `-h, --help`      | Display help message                            |
 
 The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell).
 
 </details>
 
+---
+
 ### Linux
 
 ```bash
-./upstall-pwsh-linux.sh                 # Install/update latest
-./upstall-pwsh-linux.sh --tag v7.5.4   # Specific version
-./upstall-pwsh-linux.sh --uninstall    # Remove
+# Install/update latest
+./upstall-pwsh-linux.sh
+
+# Specific version
+./upstall-pwsh-linux.sh --tag v7.5.4
+
+# Remove
+./upstall-pwsh-linux.sh --uninstall
 ```
 
 <details>
-<summary>Options & Notes</summary>
+<summary>Options</summary>
 
-Options: `--tag`, `--out-dir`, `--keep-tar`, `--force`, `--uninstall`, `--skip-checksum`, `-n|--dry-run`, `-h|--help`
+| Option            | Description                                     |
+| ----------------- | ----------------------------------------------- |
+| `--tag <tag>`     | Install specific release version (e.g., v7.5.4) |
+| `--out-dir <dir>` | Save downloaded tarball to specified directory  |
+| `--keep-tar`      | Keep the .tar.gz file after installation        |
+| `--force`         | Reinstall even if version already installed     |
+| `--uninstall`     | Remove PowerShell installation                  |
+| `--skip-checksum` | Skip SHA256 verification (not recommended)      |
+| `-n, --dry-run`   | Show what would happen without executing        |
+| `-h, --help`      | Display help message                            |
 
 Detects x64/arm64 and glibc/musl. Installs to `/usr/local/microsoft/powershell/<version>` with symlink at `/usr/local/bin/pwsh`. Works with POSIX sh (including Alpine).
 
 </details>
 
+---
+
 ### Windows
 
-⚠️ **Run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`), to avoid process-in-use errors.**
+> [!Important]
+> Run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`), to avoid process-in-use errors.
 
 ```powershell
-powershell -File .\upstall-pwsh-windows.ps1              # Install/update latest
-powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4 # Specific version
-powershell -File .\upstall-pwsh-windows.ps1 -Uninstall  # Remove
+# Install/update latest
+powershell -File .\upstall-pwsh-windows.ps1
+
+# Specific version
+powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
+
+# Remove
+powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
 ```
 
 <details>
-<summary>Options & Notes</summary>
+<summary>Options</summary>
 
-Options: `-Tag`, `-OutDir`, `-KeepInstaller`, `-Force`, `-Uninstall`, `-SkipChecksum`, `-WhatIf`
+| Option           | Description                                      |
+| ---------------- | ------------------------------------------------ |
+| `-Tag <tag>`     | Install specific release version (e.g., v7.5.4)  |
+| `-OutDir <path>` | Save downloaded installer to specified directory |
+| `-KeepInstaller` | Keep the .msi file after installation            |
+| `-Force`         | Reinstall even if version already installed      |
+| `-Uninstall`     | Remove PowerShell installation                   |
+| `-SkipChecksum`  | Skip SHA256 verification (not recommended)       |
+| `-WhatIf`        | Show what would happen without executing         |
 
 Detects x64/arm64. Requires elevated session. Installs to `Program Files\PowerShell\7`.
+
 </details>
+
+---
 
 <details>
 <summary>Troubleshooting</summary>
 
-**Checksum failed**: File corrupted or tampered. Retry or use `--skip-checksum`.
+- **Checksum failed**: File corrupted or tampered. Retry or use `--skip-checksum`.
 
-**Network error**: Check internet connection and firewall settings.
+- **Network error**: Check internet connection and firewall settings.
 
-**Insufficient disk space**: Requires 500MB minimum free space.
+- **Insufficient disk space**: Requires 500MB minimum free space.
 
-**Permission denied**: Run with sudo (Linux/macOS) or as Administrator (Windows).
+- **Permission denied**: Run with sudo (Linux/macOS) or as Administrator (Windows).
 
-**Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead.
+- **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead.
+
 </details>
 
 ## License
