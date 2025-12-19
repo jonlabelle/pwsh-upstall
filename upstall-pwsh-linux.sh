@@ -322,6 +322,17 @@ log "Selected PowerShell release: ${REL_TAG:-<unknown tag>}"
 log "Selected package: ${PKG_NAME}"
 log "Download URL: ${PKG_URL}"
 
+if [ "${DRY_RUN}" -eq 1 ]; then
+  log "Dry-run summary:"
+  log "  Would download: ${PKG_URL}"
+  log "  Would install : ${PKG_NAME}"
+  log "  Target arch   : ${PKG_ARCH} (musl=${MUSL})"
+  log "  Would verify  : SHA256 checksum"
+  log "  Would install to /usr/local/microsoft/powershell/<version>"
+  trap - EXIT INT TERM
+  exit 0
+fi
+
 INSTALLED_VERSION=""
 if command -v pwsh >/dev/null 2>&1; then
   # shellcheck disable=SC2016
@@ -339,17 +350,6 @@ if [ "${FORCE}" -eq 0 ] && [ -n "${REL_TAG}" ] && [ -n "${INSTALLED_VERSION}" ];
       exit 0
     fi
   fi
-fi
-
-if [ "${DRY_RUN}" -eq 1 ]; then
-  log "Dry-run summary:"
-  log "  Would download: ${PKG_URL}"
-  log "  Would install : ${PKG_NAME}"
-  log "  Target arch   : ${PKG_ARCH} (musl=${MUSL})"
-  log "  Would verify  : SHA256 checksum"
-  log "  Would install to /usr/local/microsoft/powershell/<version>"
-  trap - EXIT INT TERM
-  exit 0
 fi
 
 check_disk_space "/usr/local" 500

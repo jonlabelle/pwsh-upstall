@@ -264,6 +264,17 @@ Write-Host "Selected PowerShell release: $releaseTag"
 Write-Host "Selected installer: $($asset.name)"
 Write-Host "Download URL: $($asset.browser_download_url)"
 
+$dlDir = if ($OutDir)
+{
+    $OutDir
+}
+else
+{
+    Join-Path $env:TEMP ('upstall-pwsh-' + [guid]::NewGuid())
+}
+
+if (-not $PSCmdlet.ShouldProcess($dlDir, 'Create download directory')) { return }
+
 if (-not $Force)
 {
     $installed = Get-InstalledPwshVersion
@@ -282,17 +293,6 @@ if (-not (Test-DiskSpace -Path $env:ProgramFiles -RequiredMB 500))
 {
     exit 1
 }
-
-$dlDir = if ($OutDir)
-{
-    $OutDir
-}
-else
-{
-    Join-Path $env:TEMP ('upstall-pwsh-' + [guid]::NewGuid())
-}
-
-if (-not $PSCmdlet.ShouldProcess($dlDir, 'Create download directory')) { return }
 New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
 
 try
