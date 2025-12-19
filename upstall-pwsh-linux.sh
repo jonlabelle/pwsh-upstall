@@ -3,9 +3,54 @@ set -eu
 
 # upstall-pwsh-linux.sh
 #
-# POSIX shell script to update/install Microsoft PowerShell on Linux using the
-# official GitHub release tarballs. Works on glibc and musl (e.g., Alpine) and
-# uses only /bin/sh plus curl, tar, and python3.
+# DESCRIPTION:
+#   POSIX shell script to install, upgrade, or uninstall Microsoft PowerShell on Linux
+#   using official GitHub release tarballs. Supports both glibc and musl-based distributions
+#   (e.g., Alpine Linux) on x86_64 and ARM64 architectures.
+#
+# REQUIREMENTS:
+#   - POSIX-compatible shell (/bin/sh)
+#   - curl (for downloading releases)
+#   - tar (for extracting tarballs)
+#   - python3 or python (for JSON parsing and version comparison)
+#   - sudo privileges (for installation to /usr/local)
+#   - sha256sum (for checksum verification, can be skipped with --skip-checksum)
+#
+# USAGE:
+#   ./upstall-pwsh-linux.sh [options]
+#
+#   Options:
+#     --tag <tag>        Install specific GitHub release tag (e.g., v7.5.4)
+#     --out-dir <dir>    Save downloaded tarball to specified directory
+#     --keep-tar         Retain tarball after installation
+#     --force            Reinstall even if target version already installed
+#     --uninstall        Remove PowerShell from /usr/local/microsoft/powershell
+#     --skip-checksum    Skip SHA256 verification (not recommended)
+#     -n, --dry-run      Preview actions without making changes
+#     -h, --help         Display usage information
+#
+# EXAMPLES:
+#   # Install latest stable release
+#   ./upstall-pwsh-linux.sh
+#
+#   # Install specific version
+#   ./upstall-pwsh-linux.sh --tag v7.5.4
+#
+#   # Preview installation without making changes
+#   ./upstall-pwsh-linux.sh --dry-run
+#
+#   # Uninstall PowerShell
+#   ./upstall-pwsh-linux.sh --uninstall
+#
+# NOTES:
+#   - Installs to /usr/local/microsoft/powershell/<version>
+#   - Creates symlink at /usr/local/bin/pwsh
+#   - Automatically detects architecture and libc implementation
+#   - Verifies SHA256 checksums and validates disk space before installation
+#   - Default behavior downloads latest stable release (not preview/RC)
+#
+# Author: Jon LaBelle
+# Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-linux.sh
 
 REPO_OWNER="PowerShell"
 REPO_NAME="PowerShell"

@@ -1,17 +1,83 @@
 #requires -RunAsAdministrator
 
-<# upstall-pwsh-windows.ps1
-   Update/install/uninstall Microsoft PowerShell (Core) on Windows from GitHub Releases.
+<#
+    .SYNOPSIS
+        Install, upgrade, or uninstall Microsoft PowerShell on Windows from GitHub Releases.
 
-   IMPORTANT: Run from Windows PowerShell (powershell.exe), not PowerShell Core (pwsh.exe),
-   to avoid process-in-use errors when upgrading an existing PowerShell Core installation.
+    .DESCRIPTION
+        PowerShell script to install, upgrade, or uninstall Microsoft PowerShell (Core) on Windows
+        using official MSI packages from GitHub Releases. Supports both x86_64 and ARM64 architectures.
 
-   Usage examples:
-     powershell -File .\upstall-pwsh-windows.ps1
-     powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
-     powershell -File .\upstall-pwsh-windows.ps1 -Force
-     powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
-     powershell -File .\upstall-pwsh-windows.ps1 -WhatIf
+        IMPORTANT: Run this script from Windows PowerShell (powershell.exe), not PowerShell Core (pwsh.exe),
+        to avoid process-in-use errors when upgrading an existing PowerShell Core installation.
+
+    .PARAMETER Tag
+        Install a specific GitHub release tag (e.g., v7.5.4). If omitted, installs the latest stable release.
+
+    .PARAMETER OutDir
+        Save the downloaded MSI installer to the specified directory. If omitted, uses a temporary directory.
+
+    .PARAMETER KeepInstaller
+        Retain the MSI installer after installation. By default, the installer is deleted unless -OutDir is specified.
+
+    .PARAMETER Force
+        Reinstall even if the target version is already installed.
+
+    .PARAMETER Uninstall
+        Remove PowerShell using the MSI uninstall string from the Windows registry.
+
+    .PARAMETER SkipChecksum
+        Skip SHA256 checksum verification (not recommended).
+
+    .PARAMETER WhatIf
+        Preview actions without making any changes to the system.
+
+    .EXAMPLE
+        powershell -File .\upstall-pwsh-windows.ps1
+        Install the latest stable PowerShell release.
+
+    .EXAMPLE
+        powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
+        Install PowerShell version 7.5.4.
+
+    .EXAMPLE
+        powershell -File .\upstall-pwsh-windows.ps1 -Force
+        Reinstall the latest version even if already installed.
+
+    .EXAMPLE
+        powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
+        Uninstall PowerShell from the system.
+
+    .EXAMPLE
+        powershell -File .\upstall-pwsh-windows.ps1 -WhatIf
+        Preview what would happen without making any changes.
+
+    .NOTES
+        Filename: upstall-pwsh-windows.ps1
+
+        Requirements:
+        - Windows PowerShell 5.1+ with Administrator privileges
+        - Internet connectivity to GitHub API
+        - Sufficient disk space (~500MB recommended)
+
+        The script automatically:
+        - Detects system architecture (x64 or ARM64)
+        - Downloads MSI installer from GitHub Releases
+        - Verifies SHA256 checksums
+        - Performs silent installation with msiexec
+        - Validates disk space before installation
+        - Uses semantic version comparison to detect upgrades
+
+        Default behavior downloads the latest stable release (not preview/RC).
+
+        Author: Jon LaBelle
+        Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-windows.ps1
+
+    .LINK
+        https://github.com/PowerShell/PowerShell/releases
+
+    .LINK
+        https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-windows.ps1
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -204,11 +270,11 @@ if (-not $Uninstall)
         $installedVersion = Get-InstalledPwshVersion
         if ($installedVersion)
         {
-            Write-Warning "You are running this script from PowerShell Core (pwsh.exe)."
+            Write-Warning 'You are running this script from PowerShell Core (pwsh.exe).'
             Write-Warning "The MSI installer may fail with 'process in use' errors when upgrading."
-            Write-Warning "For best results, run this script from Windows PowerShell (powershell.exe):"
-            Write-Warning "  powershell -File .\upstall-pwsh-windows.ps1"
-            Write-Host ""
+            Write-Warning 'For best results, run this script from Windows PowerShell (powershell.exe):'
+            Write-Warning '  powershell -File .\upstall-pwsh-windows.ps1'
+            Write-Host ''
             Start-Sleep -Seconds 3
         }
     }

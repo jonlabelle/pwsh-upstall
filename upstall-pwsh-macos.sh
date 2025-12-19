@@ -3,17 +3,56 @@ set -euo pipefail
 
 # upstall-pwsh-macos.sh
 #
-# Downloads and installs Microsoft PowerShell for macOS (arm64 or x64) from GitHub Releases.
+# DESCRIPTION:
+#   Bash script to install, upgrade, or uninstall Microsoft PowerShell on macOS
+#   using official GitHub release packages. Supports both ARM64 (Apple Silicon) and
+#   x86_64 (Intel) architectures.
 #
-# Notes:
-# - Default behavior installs the latest *stable* release from GitHub (/releases/latest).
-# - macOS installer packages are distributed via the official PowerShell GitHub Releases.
+# REQUIREMENTS:
+#   - macOS 13.0 or later
+#   - bash (system default)
+#   - curl (for downloading releases)
+#   - python3 or python (for JSON parsing and version comparison)
+#   - sudo privileges (for installation/uninstall)
+#   - pkgutil (for signature verification, system default)
+#   - shasum (for checksum verification, can be skipped with --skip-checksum)
 #
-# Requirements:
-# - macOS 13+ (you are on macOS Tahoe 26.1)
-# - curl
-# - sudo privileges (for installation/uninstall)
-# - python3 OR python (used to parse GitHub JSON reliably; avoids needing jq)
+# USAGE:
+#   ./upstall-pwsh-macos.sh [options]
+#
+#   Options:
+#     --tag <tag>        Install specific GitHub release tag (e.g., v7.5.4)
+#     --out-dir <dir>    Save downloaded package to specified directory
+#     --keep-pkg         Retain package after installation
+#     --force            Reinstall even if target version already installed
+#     --uninstall        Remove PowerShell and associated package receipts
+#     --skip-checksum    Skip SHA256 verification (not recommended)
+#     -n, --dry-run      Preview actions without making changes
+#     -h, --help         Display usage information
+#
+# EXAMPLES:
+#   # Install latest stable release
+#   ./upstall-pwsh-macos.sh
+#
+#   # Install specific version
+#   ./upstall-pwsh-macos.sh --tag v7.5.4
+#
+#   # Download to ~/Downloads and keep package
+#   ./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep-pkg
+#
+#   # Uninstall PowerShell
+#   ./upstall-pwsh-macos.sh --uninstall
+#
+# NOTES:
+#   - Installs to /usr/local/microsoft/powershell/<version>
+#   - Creates symlink at /usr/local/bin/pwsh
+#   - Automatically detects architecture (arm64 or x64)
+#   - Verifies Microsoft code signature and SHA256 checksums
+#   - Validates disk space before installation
+#   - Default behavior downloads latest stable release (not preview/RC)
+#
+# Author: Jon LaBelle
+# Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-macos.sh
 
 REPO_OWNER="PowerShell"
 REPO_NAME="PowerShell"
