@@ -4,6 +4,7 @@
     "HKLM",
     "msiexec",
     "norestart",
+    "pipefail",
     "upstall"
   ]
 }

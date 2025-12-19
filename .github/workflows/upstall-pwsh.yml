@@ -1,0 +1,214 @@
+name: upstall-pwsh
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Run dry-run test
+        run: |
+          set -euo pipefail
+          chmod +x upstall-pwsh-linux.sh
+          ./upstall-pwsh-linux.sh --dry-run
+
+      - name: Install PowerShell
+        run: |
+          set -euo pipefail
+          sudo ./upstall-pwsh-linux.sh --force
+
+      - name: Verify installation
+        run: |
+          set -euo pipefail
+          if ! command -v pwsh >/dev/null 2>&1; then
+            echo "ERROR: pwsh command not found after installation" >&2
+            exit 1
+          fi
+          echo "PowerShell installed successfully"
+          pwsh -NoLogo -NoProfile -Command '
+            Write-Host "PowerShell Version: $($PSVersionTable.PSVersion.ToString())"
+            Write-Host "Edition: $($PSVersionTable.PSEdition)"
+            Write-Host "OS: $($PSVersionTable.OS)"
+          '
+
+      - name: Uninstall PowerShell
+        run: |
+          set -euo pipefail
+          sudo ./upstall-pwsh-linux.sh --uninstall
+
+      - name: Verify uninstallation
+        run: |
+          set -euo pipefail
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "ERROR: pwsh still present after uninstall" >&2
+            exit 1
+          fi
+          echo "PowerShell uninstalled successfully"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@main
+        with:
+          name: linux-logs
+          path: |
+            /var/log/
+            ~/.local/share/powershell/
+          if-no-files-found: ignore
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Run dry-run test
+        run: |
+          set -euo pipefail
+          chmod +x upstall-pwsh-macos.sh
+          ./upstall-pwsh-macos.sh --dry-run
+
+      - name: Install PowerShell
+        run: |
+          set -euo pipefail
+          sudo ./upstall-pwsh-macos.sh --force
+
+      - name: Verify installation
+        run: |
+          set -euo pipefail
+          if ! command -v pwsh >/dev/null 2>&1; then
+            echo "ERROR: pwsh command not found after installation" >&2
+            exit 1
+          fi
+          echo "PowerShell installed successfully"
+          pwsh -NoLogo -NoProfile -Command '
+            Write-Host "PowerShell Version: $($PSVersionTable.PSVersion.ToString())"
+            Write-Host "Edition: $($PSVersionTable.PSEdition)"
+            Write-Host "OS: $($PSVersionTable.OS)"
+          '
+
+      - name: Uninstall PowerShell
+        run: |
+          set -euo pipefail
+          sudo ./upstall-pwsh-macos.sh --uninstall
+
+      - name: Verify uninstallation
+        run: |
+          set -euo pipefail
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "ERROR: pwsh still present after uninstall" >&2
+            exit 1
+          fi
+          echo "PowerShell uninstalled successfully"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@main
+        with:
+          name: macos-logs
+          path: |
+            ~/Library/Logs/
+            ~/.local/share/powershell/
+          if-no-files-found: ignore
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Capture pre-install state
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host "Pre-install PowerShell state:"
+          Get-Command pwsh -ErrorAction SilentlyContinue | Select-Object Name, Version, Source | Format-List
+          $preInstallPath = (Get-Command pwsh -ErrorAction SilentlyContinue)
+          if ($preInstallPath) {
+            $env:PRE_INSTALL_PWSH_PATH = $preInstallPath.Source
+          } else {
+            $env:PRE_INSTALL_PWSH_PATH = ''
+          }
+          "PRE_INSTALL_PWSH_PATH=$env:PRE_INSTALL_PWSH_PATH" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run dry-run test
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          .\upstall-pwsh-windows.ps1 -WhatIf -Verbose
+
+      - name: Install PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          .\upstall-pwsh-windows.ps1 -Force -Verbose
+
+      - name: Verify installation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+            Write-Error "ERROR: pwsh command not found after installation"
+            exit 1
+          }
+          Write-Host "PowerShell installed successfully"
+          # Run pwsh to verify it works and show version
+          & pwsh -NoLogo -NoProfile -Command '
+            Write-Host "PowerShell Version: $($PSVersionTable.PSVersion.ToString())"
+            Write-Host "Edition: $($PSVersionTable.PSEdition)"
+            Write-Host "OS: $($PSVersionTable.OS)"
+          '
+
+      - name: Uninstall PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          .\upstall-pwsh-windows.ps1 -Uninstall -Verbose
+
+      - name: Verify uninstallation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $postUninstallCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+          $postUninstallPath = if ($postUninstallCmd) { $postUninstallCmd.Source } else { $null }
+
+          # If pwsh still exists, verify it's the same pre-existing installation
+          if ($postUninstallPath) {
+            Write-Host "pwsh found at: $postUninstallPath"
+            if ($env:PRE_INSTALL_PWSH_PATH) {
+              if ($postUninstallPath -eq $env:PRE_INSTALL_PWSH_PATH) {
+                Write-Host "OK: Only pre-existing PowerShell remains (system installation)"
+              } else {
+                Write-Error "ERROR: Different pwsh version found after uninstall. Expected pre-existing at '$env:PRE_INSTALL_PWSH_PATH' but found '$postUninstallPath'"
+                exit 1
+              }
+            } else {
+              Write-Error "ERROR: pwsh present after uninstall, but none existed before installation"
+              exit 1
+            }
+          } else {
+            Write-Host "PowerShell uninstalled successfully (pwsh command not found)"
+          }
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@main
+        with:
+          name: windows-logs
+          path: |
+            ${{ runner.temp }}
+            ${{ github.workspace }}
+          if-no-files-found: ignore

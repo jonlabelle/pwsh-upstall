@@ -17,6 +17,17 @@ OUT_DIR="" # destination directory for the downloaded tarball
 KEEP_TAR=0
 FORCE=0
 UNINSTALL=0
+SKIP_CHECKSUM=0
+TMP_DIR=""
+
+cleanup_on_error() {
+  if [ -n "${TMP_DIR}" ] && [ -d "${TMP_DIR}" ]; then
+    log "Cleaning up temporary files due to error..."
+    rm -rf "${TMP_DIR}" 2>/dev/null || true
+  fi
+}
+
+trap cleanup_on_error EXIT INT TERM
 
 usage() {
   cat <<'USAGE'
@@ -30,6 +41,7 @@ Options:
   --keep-tar         Keep the downloaded tarball after installation (default: delete unless --out-dir is used).
   --force            Reinstall even if the target version is already installed.
   --uninstall        Remove PowerShell from the default install location.
+  --skip-checksum    Skip SHA256 checksum verification (not recommended).
   -n, --dry-run      Show what would happen, but do not download or install.
   -h, --help         Show help.
 
@@ -67,6 +79,66 @@ need_cmd() {
   fi
 }
 
+check_network() {
+  if ! curl -fsSL --connect-timeout 5 --max-time 10 "https://api.github.com" >/dev/null 2>&1; then
+    echo "ERROR: Cannot reach GitHub API. Check your internet connection." >&2
+    exit 1
+  fi
+}
+
+check_disk_space() {
+  _target_dir="${1}"
+  _required_mb="${2:-500}"
+
+  if ! command -v df >/dev/null 2>&1; then
+    log "Warning: 'df' command not found, skipping disk space check"
+    return 0
+  fi
+
+  _available_kb=$(df -k "${_target_dir}" 2>/dev/null | awk 'NR==2 {print $4}')
+
+  if [ -z "${_available_kb}" ]; then
+    log "Warning: Could not determine available disk space"
+    return 0
+  fi
+
+  _available_mb=$((_available_kb / 1024))
+
+  if [ "${_available_mb}" -lt "${_required_mb}" ]; then
+    echo "ERROR: Insufficient disk space. Required: ${_required_mb}MB, Available: ${_available_mb}MB" >&2
+    exit 1
+  fi
+
+  log "Disk space check passed: ${_available_mb}MB available"
+}
+
+compare_versions() {
+  _v1="${1#v}"
+  _v2="${2#v}"
+
+  "${PYTHON}" - "${_v1}" "${_v2}" <<'PY'
+import sys
+from packaging import version
+try:
+    v1 = version.parse(sys.argv[1])
+    v2 = version.parse(sys.argv[2])
+    if v1 == v2:
+        sys.exit(0)
+    elif v1 < v2:
+        sys.exit(1)
+    else:
+        sys.exit(2)
+except:
+    # Fallback to string comparison
+    if sys.argv[1] == sys.argv[2]:
+        sys.exit(0)
+    elif sys.argv[1] < sys.argv[2]:
+        sys.exit(1)
+    else:
+        sys.exit(2)
+PY
+}
+
 while [ $# -gt 0 ]; do
   case "${1}" in
   --tag)
@@ -87,6 +159,10 @@ while [ $# -gt 0 ]; do
     ;;
   --uninstall)
     UNINSTALL=1
+    shift
+    ;;
+  --skip-checksum)
+    SKIP_CHECKSUM=1
     shift
     ;;
   -n | --dry-run)
@@ -124,6 +200,7 @@ need_cmd curl
 need_cmd tar
 
 if [ "${UNINSTALL}" -eq 1 ]; then
+  trap - EXIT INT TERM
   INSTALL_ROOT="/usr/local/microsoft/powershell"
   if [ -d "${INSTALL_ROOT}" ]; then
     log "Removing ${INSTALL_ROOT}"
@@ -141,12 +218,12 @@ fi
 
 ARCH="$(uname -m)"
 case "${ARCH}" in
-  x86_64) PKG_ARCH="x64" ;;
-  aarch64 | arm64) PKG_ARCH="arm64" ;;
-  *)
-    echo "ERROR: Unsupported architecture: ${ARCH} (expected x86_64 or arm64)." >&2
-    exit 1
-    ;;
+x86_64) PKG_ARCH="x64" ;;
+aarch64 | arm64) PKG_ARCH="arm64" ;;
+*)
+  echo "ERROR: Unsupported architecture: ${ARCH} (expected x86_64 or arm64)." >&2
+  exit 1
+  ;;
 esac
 
 MUSL=0
@@ -170,6 +247,9 @@ else
   exit 1
 fi
 
+log "Checking network connectivity..."
+check_network
+
 if [ -n "${TAG}" ]; then
   RELEASE_URL="${API_BASE}/releases/tags/${TAG}"
 else
@@ -177,7 +257,7 @@ else
 fi
 
 log "Fetching release metadata: ${RELEASE_URL}"
-JSON="$(curl -fsSL "${RELEASE_URL}")"
+JSON="$(curl -fsSL --retry 3 --retry-delay 2 "${RELEASE_URL}")"
 
 REL_DATA="$(
   "${PYTHON}" - "${JSON}" "${TARGET_SUFFIX}" <<'PY'
@@ -188,11 +268,14 @@ target = sys.argv[2]
 tag = data.get("tag_name") or ""
 assets = data.get("assets") or []
 candidates = []
+sha_url = ""
 for a in assets:
     name = a.get("name") or ""
     url = a.get("browser_download_url") or ""
     if target in name and name.endswith(".tar.gz"):
         candidates.append((name, url))
+    elif name.endswith(".tar.gz.sha256") and target in name:
+        sha_url = url
 
 def score(item):
     name, _ = item
@@ -205,15 +288,22 @@ def score(item):
 candidates.sort(key=score, reverse=True)
 if candidates:
     name, url = candidates[0]
-    print(tag, url, name)
+    # Find corresponding SHA file
+    sha_name = name + ".sha256"
+    for a in assets:
+        if a.get("name") == sha_name:
+            sha_url = a.get("browser_download_url") or ""
+            break
+    print(tag, url, name, sha_url)
 else:
-    print(tag, "", "")
+    print(tag, "", "", "")
 PY
 )"
 
 REL_TAG=$(printf '%s\n' "${REL_DATA}" | awk '{print $1}')
 PKG_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $2}')
 PKG_NAME=$(printf '%s\n' "${REL_DATA}" | awk '{print $3}')
+SHA_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $4}')
 
 if [ -z "${PKG_URL}" ]; then
   echo "ERROR: Could not find a ${TARGET_SUFFIX} asset in that release." >&2
@@ -232,9 +322,14 @@ fi
 
 if [ "${FORCE}" -eq 0 ] && [ -n "${REL_TAG}" ] && [ -n "${INSTALLED_VERSION}" ]; then
   DESIRED_VERSION="${REL_TAG#v}"
-  if [ -n "${DESIRED_VERSION}" ] && [ "${INSTALLED_VERSION}" = "${DESIRED_VERSION}" ]; then
-    log "PowerShell ${INSTALLED_VERSION} is already installed; use --force to reinstall."
-    exit 0
+  if [ -n "${DESIRED_VERSION}" ]; then
+    compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"
+    version_cmp=$?
+    if [ ${version_cmp} -eq 0 ]; then
+      log "PowerShell ${INSTALLED_VERSION} is already installed; use --force to reinstall."
+      trap - EXIT INT TERM
+      exit 0
+    fi
   fi
 fi
 
@@ -243,14 +338,18 @@ if [ "${DRY_RUN}" -eq 1 ]; then
   log "  Would download: ${PKG_URL}"
   log "  Would install : ${PKG_NAME}"
   log "  Target arch   : ${PKG_ARCH} (musl=${MUSL})"
+  log "  Would verify  : SHA256 checksum"
   log "  Would install to /usr/local/microsoft/powershell/<version>"
+  trap - EXIT INT TERM
   exit 0
 fi
 
-TMP_DIR=""
+check_disk_space "/usr/local" 500
+
 if [ -n "${OUT_DIR}" ]; then
   run mkdir -p "${OUT_DIR}"
   DL_DIR="${OUT_DIR}"
+  TMP_DIR=""
 else
   TMP_DIR="$(mktemp -d)"
   DL_DIR="${TMP_DIR}"
@@ -258,8 +357,36 @@ fi
 
 PKG_PATH="${DL_DIR%/}/${PKG_NAME}"
 
+if [ -f "${PKG_PATH}" ]; then
+  log "Removing existing incomplete download: ${PKG_PATH}"
+  rm -f "${PKG_PATH}"
+fi
+
 log "Downloading to: ${PKG_PATH}"
-run curl -fL --retry 3 --retry-delay 2 -o "${PKG_PATH}" "${PKG_URL}"
+run curl -fL --retry 3 --retry-delay 2 -C - -o "${PKG_PATH}" "${PKG_URL}"
+
+if [ "${SKIP_CHECKSUM}" -eq 0 ] && [ -n "${SHA_URL}" ]; then
+  need_cmd sha256sum
+  SHA_PATH="${PKG_PATH}.sha256"
+  log "Downloading checksum file..."
+  run curl -fsSL --retry 3 --retry-delay 2 -o "${SHA_PATH}" "${SHA_URL}"
+
+  log "Verifying SHA256 checksum..."
+  cd "${DL_DIR}"
+  EXPECTED_SHA=$(cat "${SHA_PATH}" | awk '{print $1}')
+  ACTUAL_SHA=$(sha256sum "${PKG_NAME}" | awk '{print $1}')
+
+  if [ "${EXPECTED_SHA}" != "${ACTUAL_SHA}" ]; then
+    echo "ERROR: SHA256 checksum verification failed!" >&2
+    echo "  Expected: ${EXPECTED_SHA}" >&2
+    echo "  Got:      ${ACTUAL_SHA}" >&2
+    exit 1
+  fi
+  log "SHA256 checksum verified successfully"
+  rm -f "${SHA_PATH}"
+elif [ "${SKIP_CHECKSUM}" -eq 0 ]; then
+  log "Warning: SHA256 file not found, skipping checksum verification"
+fi
 
 DESIRED_VERSION="${REL_TAG#v}"
 INSTALL_ROOT="/usr/local/microsoft/powershell"
@@ -278,7 +405,9 @@ else
   if [ -n "${TMP_DIR}" ]; then
     log "Cleaning up temporary files…"
     run rm -rf "${TMP_DIR}"
+    TMP_DIR=""
   fi
 fi
 
+trap - EXIT INT TERM
 log "Done. Verify with: pwsh -v"

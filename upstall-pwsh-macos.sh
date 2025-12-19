@@ -25,6 +25,17 @@ KEEP_PKG=0
 OUT_DIR="" # optional destination directory for the downloaded pkg
 FORCE=0
 UNINSTALL=0
+SKIP_CHECKSUM=0
+TMP_DIR=""
+
+cleanup_on_error() {
+  if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
+    log "Cleaning up temporary files due to error..."
+    rm -rf "${TMP_DIR}" 2>/dev/null || true
+  fi
+}
+
+trap cleanup_on_error EXIT INT TERM
 
 usage() {
   cat <<'USAGE'
@@ -38,6 +49,7 @@ Options:
   --keep-pkg         Keep the downloaded .pkg after installation (default: delete unless --out-dir is used).
   --force            Reinstall even if the target version is already installed.
   --uninstall        Uninstall PowerShell from the default install location.
+  --skip-checksum    Skip SHA256 checksum verification (not recommended).
   -n, --dry-run      Show what would happen, but do not download or install.
   -h, --help         Show help.
 
@@ -76,6 +88,81 @@ need_cmd() {
     echo "ERROR: missing required command: $1" >&2
     exit 1
   }
+}
+
+check_network() {
+  if ! curl -fsSL --connect-timeout 5 --max-time 10 "https://api.github.com" >/dev/null 2>&1; then
+    echo "ERROR: Cannot reach GitHub API. Check your internet connection." >&2
+    exit 1
+  fi
+}
+
+check_disk_space() {
+  local target_dir="${1}"
+  local required_mb="${2:-500}"
+
+  if ! command -v df >/dev/null 2>&1; then
+    log "Warning: 'df' command not found, skipping disk space check"
+    return 0
+  fi
+
+  local available_kb
+  available_kb=$(df -k "${target_dir}" 2>/dev/null | awk 'NR==2 {print $4}')
+
+  if [[ -z "${available_kb}" ]]; then
+    log "Warning: Could not determine available disk space"
+    return 0
+  fi
+
+  local available_mb=$((available_kb / 1024))
+
+  if [[ "${available_mb}" -lt "${required_mb}" ]]; then
+    echo "ERROR: Insufficient disk space. Required: ${required_mb}MB, Available: ${available_mb}MB" >&2
+    exit 1
+  fi
+
+  log "Disk space check passed: ${available_mb}MB available"
+}
+
+compare_versions() {
+  local v1="${1#v}"
+  local v2="${2#v}"
+
+  "${PYTHON}" - "${v1}" "${v2}" <<'PY'
+import sys
+from packaging import version
+try:
+    v1 = version.parse(sys.argv[1])
+    v2 = version.parse(sys.argv[2])
+    if v1 == v2:
+        sys.exit(0)
+    elif v1 < v2:
+        sys.exit(1)
+    else:
+        sys.exit(2)
+except:
+    # Fallback to string comparison
+    if sys.argv[1] == sys.argv[2]:
+        sys.exit(0)
+    elif sys.argv[1] < sys.argv[2]:
+        sys.exit(1)
+    else:
+        sys.exit(2)
+PY
+}
+
+verify_microsoft_signature() {
+  local pkg_path="${1}"
+
+  log "Verifying package signature..."
+  if ! pkgutil --check-signature "${pkg_path}" 2>&1 | grep -q "Developer ID Installer: Microsoft Corporation"; then
+    log "Warning: Package does not appear to be signed by Microsoft Corporation"
+    log "Signature details:"
+    pkgutil --check-signature "${pkg_path}" 2>&1 || true
+    return 1
+  fi
+  log "Package signature verified: Microsoft Corporation"
+  return 0
 }
 
 uninstall_pwsh() {
@@ -151,6 +238,10 @@ while [[ $# -gt 0 ]]; do
     UNINSTALL=1
     shift
     ;;
+  --skip-checksum)
+    SKIP_CHECKSUM=1
+    shift
+    ;;
   -n | --dry-run)
     DRY_RUN=1
     shift
@@ -176,6 +267,7 @@ if [[ "${UNINSTALL}" -eq 0 ]]; then
 fi
 
 if [[ "${UNINSTALL}" -eq 1 ]]; then
+  trap - EXIT INT TERM
   uninstall_pwsh
   exit 0
 fi
@@ -203,6 +295,9 @@ else
   exit 1
 fi
 
+log "Checking network connectivity..."
+check_network
+
 # Decide which API endpoint to hit
 if [[ -n "${TAG}" ]]; then
   RELEASE_URL="${API_BASE}/releases/tags/${TAG}"
@@ -212,13 +307,12 @@ fi
 
 log "Fetching release metadata: ${RELEASE_URL}"
 # Dry-run should still fetch metadata so we can show the exact asset we'd pick.
-JSON="$(curl -fsSL "${RELEASE_URL}")"
+JSON="$(curl -fsSL --retry 3 --retry-delay 2 "${RELEASE_URL}")"
 
 TARGET_PKG_SUFFIX="osx-${PKG_ARCH}.pkg"
 
-# Extract (1) tag_name and (2) matching .pkg download URL for the current macOS arch
-# We select assets containing the appropriate osx-<arch>.pkg and avoid preview naming patterns where possible.
-read -r REL_TAG PKG_URL PKG_NAME < <(
+# Extract (1) tag_name, (2) matching .pkg download URL, and (3) SHA256 file URL for the current macOS arch
+read -r REL_TAG PKG_URL PKG_NAME SHA_URL < <(
   "${PYTHON}" - "${JSON}" "${TARGET_PKG_SUFFIX}" <<'PY'
 import json, sys, re
 data = json.loads(sys.argv[1])
@@ -248,10 +342,17 @@ def score(item):
 candidates.sort(key=score, reverse=True)
 
 if not candidates:
-  print(tag, "", "")
+  print(tag, "", "", "")
 else:
   name, url = candidates[0]
-  print(tag, url, name)
+  # Find corresponding SHA file
+  sha_name = name + ".sha256"
+  sha_url = ""
+  for a in assets:
+    if a.get("name") == sha_name:
+      sha_url = a.get("browser_download_url") or ""
+      break
+  print(tag, url, name, sha_url)
 PY
 )
 
@@ -274,13 +375,18 @@ if [[ "${FORCE}" -eq 0 ]]; then
 
   if [[ -n "${REL_TAG}" && -n "${INSTALLED_VERSION}" ]]; then
     DESIRED_VERSION="${REL_TAG#v}"
-    if [[ -n "${DESIRED_VERSION}" && "${INSTALLED_VERSION}" == "${DESIRED_VERSION}" ]]; then
-      if [[ "${DRY_RUN}" -eq 1 ]]; then
-        log "PowerShell ${INSTALLED_VERSION} is already installed; would skip install (use --force to reinstall)."
-      else
-        log "PowerShell ${INSTALLED_VERSION} is already installed; skipping install. Use --force to reinstall."
+    if [[ -n "${DESIRED_VERSION}" ]]; then
+      compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"
+      version_cmp=$?
+      if [[ ${version_cmp} -eq 0 ]]; then
+        if [[ "${DRY_RUN}" -eq 1 ]]; then
+          log "PowerShell ${INSTALLED_VERSION} is already installed; would skip install (use --force to reinstall)."
+        else
+          log "PowerShell ${INSTALLED_VERSION} is already installed; skipping install. Use --force to reinstall."
+        fi
+        trap - EXIT INT TERM
+        exit 0
       fi
-      exit 0
     fi
   fi
 fi
@@ -289,38 +395,65 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
   log "Dry-run summary:"
   log "  Would download: ${PKG_URL}"
   log "  Would install : ${PKG_NAME}"
+  log "  Would verify  : SHA256 checksum & Microsoft signature"
   log "  Would run     : sudo installer -pkg <downloaded-pkg> -target /"
+  trap - EXIT TERM
   exit 0
 fi
 
+check_disk_space "/usr/local" 500
+
 # Determine download directory
-TMP_DIR=""
 if [[ -n "${OUT_DIR}" ]]; then
-  if [[ "${DRY_RUN}" -eq 1 ]]; then
-    log "[dry-run] mkdir -p \"${OUT_DIR}\""
-  else
-    mkdir -p "${OUT_DIR}"
-  fi
+  run mkdir -p "${OUT_DIR}"
   DL_DIR="${OUT_DIR}"
+  TMP_DIR=""
 else
-  # temp dir
-  if [[ "${DRY_RUN}" -eq 1 ]]; then
-    DL_DIR="/tmp/<temp-dir>"
-  else
-    TMP_DIR="$(mktemp -d)"
-    DL_DIR="${TMP_DIR}"
-  fi
+  TMP_DIR="$(mktemp -d)"
+  DL_DIR="${TMP_DIR}"
 fi
 
 PKG_PATH="${DL_DIR%/}/${PKG_NAME}"
 
+if [[ -f "${PKG_PATH}" ]]; then
+  log "Removing existing incomplete download: ${PKG_PATH}"
+  rm -f "${PKG_PATH}"
+fi
+
 # Download
 log "Downloading to: ${PKG_PATH}"
-run curl -fL --retry 3 --retry-delay 2 -o "${PKG_PATH}" "${PKG_URL}"
+run curl -fL --retry 3 --retry-delay 2 -C - -o "${PKG_PATH}" "${PKG_URL}"
 
-# Verify installer signature (Gatekeeper-style signature check for .pkg)
-log "Checking package signature (pkgutil --check-signature)…"
+# Verify SHA256 checksum
+if [[ "${SKIP_CHECKSUM}" -eq 0 && -n "${SHA_URL}" ]]; then
+  need_cmd shasum
+  SHA_PATH="${PKG_PATH}.sha256"
+  log "Downloading checksum file..."
+  run curl -fsSL --retry 3 --retry-delay 2 -o "${SHA_PATH}" "${SHA_URL}"
+
+  log "Verifying SHA256 checksum..."
+  cd "${DL_DIR}"
+  EXPECTED_SHA=$(cat "${SHA_PATH}" | awk '{print $1}')
+  ACTUAL_SHA=$(shasum -a 256 "${PKG_NAME}" | awk '{print $1}')
+
+  if [[ "${EXPECTED_SHA}" != "${ACTUAL_SHA}" ]]; then
+    echo "ERROR: SHA256 checksum verification failed!" >&2
+    echo "  Expected: ${EXPECTED_SHA}" >&2
+    echo "  Got:      ${ACTUAL_SHA}" >&2
+    exit 1
+  fi
+  log "SHA256 checksum verified successfully"
+  rm -f "${SHA_PATH}"
+elif [[ "${SKIP_CHECKSUM}" -eq 0 ]]; then
+  log "Warning: SHA256 file not found, skipping checksum verification"
+fi
+
+# Verify Microsoft signature
+log "Checking package signature..."
 run pkgutil --check-signature "${PKG_PATH}"
+if [[ "${DRY_RUN}" -eq 0 ]]; then
+  verify_microsoft_signature "${PKG_PATH}" || log "Warning: Could not verify Microsoft signature"
+fi
 
 # Install
 log "Installing PowerShell (requires sudo)…"
@@ -339,10 +472,9 @@ else
   if [[ -n "${TMP_DIR}" ]]; then
     log "Cleaning up temporary files…"
     run rm -rf "${TMP_DIR}"
-  else
-    # If temp dir wasn't created (e.g. dry-run), do nothing
-    :
+    TMP_DIR=""
   fi
 fi
 
+trap - EXIT INT TERM
 log "Done."
