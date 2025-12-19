@@ -1,13 +1,13 @@
-# PowerShell Installer for macOS (Apple Silicon)
+# PowerShell Installer for macOS
 
-> The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell). This script installs PowerShell on macOS (Apple Silicon) directly from the official GitHub Releases.
+> The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell). This script installs PowerShell on macOS, automatically selecting the correct Apple Silicon (arm64) or Intel (x64) package from the official GitHub Releases.
 
-This script downloads and installs **Microsoft PowerShell** on **macOS (Apple Silicon / arm64)** directly from the [official GitHub Releases](https://github.com/powershell/powershell/releases).
+This script downloads and installs **Microsoft PowerShell** on **macOS**, detecting your architecture and pulling the matching installer directly from the [official GitHub Releases](https://github.com/powershell/powershell/releases).
 
 ## Requirements
 
 - macOS 13+ (tested on macOS Tahoe 26.1)
-- Apple Silicon (`arm64`)
+- Apple Silicon (`arm64`) or Intel (`x86_64`)
 - `curl`
 - `pkgutil`
 - `installer`
@@ -76,7 +76,7 @@ Use `--uninstall` to remove the default PowerShell install created by this scrip
 ## What the script does
 
 1. Queries the PowerShell GitHub Releases API
-2. Selects the official `osx-arm64.pkg`
+2. Detects your architecture and selects the official `osx-arm64.pkg` or `osx-x64.pkg`
 3. Downloads the package
 4. Verifies the installer signature:
 5. Installs PowerShell using `sudo installer -pkg <pkg> -target /`

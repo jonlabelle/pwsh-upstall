@@ -3,7 +3,7 @@ set -euo pipefail
 
 # install-pwsh-macos.sh
 #
-# Downloads and installs Microsoft PowerShell for macOS (arm64) from GitHub Releases.
+# Downloads and installs Microsoft PowerShell for macOS (arm64 or x64) from GitHub Releases.
 #
 # Notes:
 # - Default behavior installs the latest *stable* release from GitHub (/releases/latest).
@@ -42,7 +42,7 @@ Options:
   -h, --help         Show help.
 
 Examples:
-  # Install latest stable PowerShell (arm64)
+  # Install latest stable PowerShell
   ./install-pwsh-macos.sh
 
   # Install a specific version
@@ -176,10 +176,16 @@ if [[ "${UNINSTALL}" -eq 1 ]]; then
 fi
 
 ARCH="$(uname -m)"
-if [[ "$ARCH" != "arm64" ]]; then
-  echo "ERROR: This script is intended for Apple Silicon (arm64). Detected: $ARCH" >&2
+case "${ARCH}" in
+arm64) PKG_ARCH="arm64" ;;
+x86_64) PKG_ARCH="x64" ;;
+*)
+  echo "ERROR: Unsupported architecture: ${ARCH} (expected arm64 or x86_64)." >&2
   exit 1
-fi
+  ;;
+esac
+
+log "Detected architecture: ${ARCH} -> selecting macOS ${PKG_ARCH} package"
 
 PYTHON=""
 if command -v python3 >/dev/null 2>&1; then
@@ -193,7 +199,7 @@ else
 fi
 
 # Decide which API endpoint to hit
-if [[ -n "$TAG" ]]; then
+if [[ -n "${TAG}" ]]; then
   RELEASE_URL="${API_BASE}/releases/tags/${TAG}"
 else
   RELEASE_URL="${API_BASE}/releases/latest"
@@ -203,12 +209,15 @@ log "Fetching release metadata: ${RELEASE_URL}"
 # Dry-run should still fetch metadata so we can show the exact asset we'd pick.
 JSON="$(curl -fsSL "${RELEASE_URL}")"
 
-# Extract (1) tag_name and (2) matching .pkg download URL for macOS arm64
-# We select assets containing "osx-arm64.pkg" and avoid preview naming patterns where possible.
+TARGET_PKG_SUFFIX="osx-${PKG_ARCH}.pkg"
+
+# Extract (1) tag_name and (2) matching .pkg download URL for the current macOS arch
+# We select assets containing the appropriate osx-<arch>.pkg and avoid preview naming patterns where possible.
 read -r REL_TAG PKG_URL PKG_NAME < <(
-  "${PYTHON}" - "${JSON}" <<'PY'
+  "${PYTHON}" - "${JSON}" "${TARGET_PKG_SUFFIX}" <<'PY'
 import json, sys, re
 data = json.loads(sys.argv[1])
+target_suffix = sys.argv[2]
 
 tag = data.get("tag_name") or ""
 
@@ -217,8 +226,8 @@ candidates = []
 for a in assets:
   name = a.get("name") or ""
   url  = a.get("browser_download_url") or ""
-  # Prefer the official macOS arm64 pkg
-  if "osx-arm64.pkg" in name and name.endswith(".pkg"):
+  # Prefer the official macOS pkg for the detected architecture
+  if target_suffix in name and name.endswith(".pkg"):
     candidates.append((name, url))
 
 # Prefer non-preview if multiple match
@@ -227,8 +236,8 @@ def score(item):
   s = 0
   if "preview" in name.lower(): s -= 10
   if "rc" in name.lower():      s -= 5
-  # Prefer plain powershell-<ver>-osx-arm64.pkg
-  if re.match(r"^powershell-.*-osx-arm64\.pkg$", name): s += 5
+  # Prefer plain powershell-<ver>-osx-<arch>.pkg
+  if re.match(rf"^powershell-.*-{re.escape(target_suffix)}$", name): s += 5
   return s
 
 candidates.sort(key=score, reverse=True)
@@ -242,7 +251,7 @@ PY
 )
 
 if [[ -z "${PKG_URL}" ]]; then
-  echo "ERROR: Could not find an osx-arm64.pkg asset in that release." >&2
+  echo "ERROR: Could not find an ${TARGET_PKG_SUFFIX} asset in that release." >&2
   echo "Tip: Try specifying --tag (e.g., --tag v7.5.4) or check the release assets in the browser." >&2
   exit 1
 fi
