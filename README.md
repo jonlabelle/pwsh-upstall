@@ -1,7 +1,5 @@
 # PowerShell Upstall (macOS / Linux / Windows)
 
-> The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell). These scripts install or update PowerShell directly from the official GitHub Releases, auto-selecting the right package for your OS and CPU architecture.
-
 This repo provides platform-specific upstall scripts:
 
 - `upstall-pwsh-macos.sh` (Bash): macOS installer/updater for Apple Silicon and Intel using the official `.pkg`.
@@ -16,6 +14,8 @@ This repo provides platform-specific upstall scripts:
 - Windows: PowerShell 5.1+ or 7+, `msiexec`. Run from an elevated session for install/upgrade.
 
 ## macOS
+
+> The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell), and you can use this script instead.
 
 ```bash
 ./upstall-pwsh-macos.sh [options]
@@ -52,6 +52,7 @@ Examples:
 ```
 
 Notes:
+
 - Detects `x64` vs `arm64` and glibc vs musl to pick `linux-<arch>.tar.gz` or `linux-musl-<arch>.tar.gz`.
 - Installs to `/usr/local/microsoft/powershell/<version>` and symlinks `/usr/local/bin/pwsh`.
 - No Bash required; works with `/bin/sh` (including Alpine's `ash`).
@@ -63,6 +64,7 @@ pwsh -File .\upstall-pwsh-windows.ps1 [-Tag v7.5.4] [-OutDir <path>] [-KeepInsta
 ```
 
 Notes:
+
 - Detects `x64` vs `arm64` and picks the matching `win-<arch>.msi`.
 - Run from an elevated PowerShell session (7+ or Windows PowerShell 5.1). The MSI supports in-place upgrades even when launched from PowerShell 7; you do not need to switch to Windows PowerShell 5.1, though the installer may prompt you to close running `pwsh` instances.
 - `-Uninstall` uses the MSI uninstall entry discovered in the registry; run elevated.
