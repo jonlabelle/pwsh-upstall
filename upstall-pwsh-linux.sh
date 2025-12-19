@@ -120,6 +120,31 @@ run() {
 need_cmd() {
   if ! command -v "${1}" >/dev/null 2>&1; then
     echo "ERROR: missing required command: ${1}" >&2
+
+    # Suggest installation command based on available package manager
+    _cmd="${1}"
+    _pkg="${1}"
+
+    # Map command names to common package names
+    case "${_cmd}" in
+    sha256sum) _pkg="coreutils" ;;
+    python3) _pkg="python3" ;;
+    esac
+
+    if command -v apt-get >/dev/null 2>&1; then
+      echo "Try: sudo apt-get install ${_pkg}" >&2
+    elif command -v dnf >/dev/null 2>&1; then
+      echo "Try: sudo dnf install ${_pkg}" >&2
+    elif command -v yum >/dev/null 2>&1; then
+      echo "Try: sudo yum install ${_pkg}" >&2
+    elif command -v apk >/dev/null 2>&1; then
+      echo "Try: sudo apk add ${_pkg}" >&2
+    elif command -v zypper >/dev/null 2>&1; then
+      echo "Try: sudo zypper install ${_pkg}" >&2
+    elif command -v pacman >/dev/null 2>&1; then
+      echo "Try: sudo pacman -S ${_pkg}" >&2
+    fi
+
     exit 1
   fi
 }
@@ -297,6 +322,22 @@ elif command -v python >/dev/null 2>&1; then
   PYTHON="python"
 else
   echo "ERROR: python3 (or python) is required to parse GitHub release JSON." >&2
+
+  # Suggest installation based on package manager
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "Try: sudo apt-get install python3" >&2
+  elif command -v dnf >/dev/null 2>&1; then
+    echo "Try: sudo dnf install python3" >&2
+  elif command -v yum >/dev/null 2>&1; then
+    echo "Try: sudo yum install python3" >&2
+  elif command -v apk >/dev/null 2>&1; then
+    echo "Try: sudo apk add python3" >&2
+  elif command -v zypper >/dev/null 2>&1; then
+    echo "Try: sudo zypper install python3" >&2
+  elif command -v pacman >/dev/null 2>&1; then
+    echo "Try: sudo pacman -S python" >&2
+  fi
+
   exit 1
 fi
 

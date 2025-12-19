@@ -125,6 +125,33 @@ run() {
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "ERROR: missing required command: $1" >&2
+
+    # Suggest installation command based on available package manager
+    local cmd="$1"
+    local pkg="$1"
+
+    # Map command names to common package names
+    case "$cmd" in
+    shasum)
+      echo "Note: shasum is typically included with macOS by default" >&2
+      ;;
+    python3)
+      if command -v brew >/dev/null 2>&1; then
+        echo "Try: brew install python3" >&2
+      else
+        echo "Try: Install Xcode Command Line Tools with 'xcode-select --install'" >&2
+        echo "Or install Homebrew from https://brew.sh and run: brew install python3" >&2
+      fi
+      ;;
+    *)
+      if command -v brew >/dev/null 2>&1; then
+        echo "Try: brew install $pkg" >&2
+      else
+        echo "Tip: Install Homebrew from https://brew.sh" >&2
+      fi
+      ;;
+    esac
+
     exit 1
   }
 }
@@ -338,7 +365,17 @@ elif command -v python >/dev/null 2>&1; then
   PYTHON="python"
 else
   echo "ERROR: python3 (or python) is required to parse GitHub release JSON." >&2
-  echo "Tip: install python3 (e.g., via Xcode Command Line Tools or a python installer)." >&2
+
+  # Suggest installation method
+  if command -v brew >/dev/null 2>&1; then
+    echo "Try: brew install python3" >&2
+  else
+    echo "Try one of the following:" >&2
+    echo "  1. Install Xcode Command Line Tools: xcode-select --install" >&2
+    echo "  2. Install Homebrew (https://brew.sh) then run: brew install python3" >&2
+    echo "  3. Download from https://www.python.org/downloads/macos/" >&2
+  fi
+
   exit 1
 fi
 
