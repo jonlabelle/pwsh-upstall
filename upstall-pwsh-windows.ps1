@@ -232,6 +232,11 @@ if ($Uninstall)
             $exe = $matches[1]
             $uninstallArgs = $matches[2]
         }
+        # Add quiet mode flags for automated uninstall
+        if ($exe -match 'msiexec' -and $uninstallArgs -notmatch '/q[nrb]?')
+        {
+            $uninstallArgs += ' /qn /norestart'
+        }
         $proc = Start-Process -FilePath $exe -ArgumentList $uninstallArgs -Wait -PassThru
         if ($proc.ExitCode -ne 0)
         {

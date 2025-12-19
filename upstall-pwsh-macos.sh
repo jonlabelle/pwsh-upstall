@@ -374,6 +374,16 @@ log "Selected PowerShell release: ${REL_TAG:-<unknown tag>}"
 log "Selected package: ${PKG_NAME}"
 log "Download URL: ${PKG_URL}"
 
+if [[ "${DRY_RUN}" -eq 1 ]]; then
+  log "Dry-run summary:"
+  log "  Would download: ${PKG_URL}"
+  log "  Would install : ${PKG_NAME}"
+  log "  Would verify  : SHA256 checksum & Microsoft signature"
+  log "  Would run     : sudo installer -pkg <downloaded-pkg> -target /"
+  trap - EXIT TERM
+  exit 0
+fi
+
 if [[ "${FORCE}" -eq 0 ]]; then
   INSTALLED_VERSION=""
   if command -v pwsh >/dev/null 2>&1; then
@@ -387,26 +397,12 @@ if [[ "${FORCE}" -eq 0 ]]; then
       compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"
       version_cmp=$?
       if [[ ${version_cmp} -eq 0 ]]; then
-        if [[ "${DRY_RUN}" -eq 1 ]]; then
-          log "PowerShell ${INSTALLED_VERSION} is already installed; would skip install (use --force to reinstall)."
-        else
-          log "PowerShell ${INSTALLED_VERSION} is already installed; skipping install. Use --force to reinstall."
-        fi
+        log "PowerShell ${INSTALLED_VERSION} is already installed; skipping install. Use --force to reinstall."
         trap - EXIT INT TERM
         exit 0
       fi
     fi
   fi
-fi
-
-if [[ "${DRY_RUN}" -eq 1 ]]; then
-  log "Dry-run summary:"
-  log "  Would download: ${PKG_URL}"
-  log "  Would install : ${PKG_NAME}"
-  log "  Would verify  : SHA256 checksum & Microsoft signature"
-  log "  Would run     : sudo installer -pkg <downloaded-pkg> -target /"
-  trap - EXIT TERM
-  exit 0
 fi
 
 check_disk_space "/usr/local" 500
