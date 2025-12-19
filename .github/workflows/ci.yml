@@ -60,9 +60,7 @@ jobs:
         uses: actions/upload-artifact@main
         with:
           name: linux-logs
-          path: |
-            /var/log/
-            ~/.local/share/powershell/
+          path: ~/.local/share/powershell/
           if-no-files-found: ignore
 
   macos:
@@ -117,9 +115,7 @@ jobs:
         uses: actions/upload-artifact@main
         with:
           name: macos-logs
-          path: |
-            ~/Library/Logs/
-            ~/.local/share/powershell/
+          path: ~/.local/share/powershell/
           if-no-files-found: ignore
 
   windows:
@@ -213,7 +209,5 @@ jobs:
         uses: actions/upload-artifact@main
         with:
           name: windows-logs
-          path: |
-            ${{ runner.temp }}
-            ${{ github.workspace }}
+          path: ${{ runner.temp }}/*.log
           if-no-files-found: ignore
