@@ -157,7 +157,8 @@ need_cmd() {
 }
 
 check_network() {
-  if [[ "${DRY_RUN}" -eq 1 ]]; then
+  # Skip network check in dry-run mode to allow preview without connectivity
+  if [ "${DRY_RUN}" -eq 1 ]; then
     return 0
   fi
 
@@ -395,7 +396,12 @@ fi
 
 log "Fetching release metadata: ${RELEASE_URL}"
 # Dry-run should still fetch metadata so we can show the exact asset we'd pick.
-JSON="$(curl -fsSL --retry 3 --retry-delay 2 "${RELEASE_URL}")"
+CURL_OPTS="-fsSL --retry 3 --retry-delay 2"
+# Use GitHub token if available (avoids rate limiting in CI environments)
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  CURL_OPTS="${CURL_OPTS} -H 'Authorization: Bearer ${GITHUB_TOKEN}'"
+fi
+JSON="$(curl ${CURL_OPTS} "${RELEASE_URL}")"
 
 TARGET_PKG_SUFFIX="osx-${PKG_ARCH}.pkg"
 

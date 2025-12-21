@@ -98,6 +98,7 @@ $apiBase = "https://api.github.com/repos/$repoOwner/$repoName"
 
 function Test-NetworkConnectivity
 {
+    # Skip network check in WhatIf mode to allow preview without connectivity
     if ($WhatIfPreference)
     {
         return $true
@@ -213,7 +214,19 @@ function Get-Release
     param([string]$TagName)
     $url = if ($TagName) { "$apiBase/releases/tags/$TagName" } else { "$apiBase/releases/latest" }
     Write-Verbose "Fetching release metadata: $url"
-    Invoke-RestMethod -Uri $url -UseBasicParsing
+
+    $params = @{
+        Uri = $url
+        UseBasicParsing = $true
+    }
+
+    # Use GitHub token if available (avoids rate limiting in CI environments)
+    if ($env:GITHUB_TOKEN)
+    {
+        $params['Headers'] = @{ Authorization = "Bearer $env:GITHUB_TOKEN" }
+    }
+
+    Invoke-RestMethod @params
 }
 
 function Select-Asset
