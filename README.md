@@ -15,6 +15,14 @@ Platform-specific scripts to install/update PowerShell Core from GitHub releases
 Downloads and installs PowerShell from GitHub releases with SHA256 verification. Auto-detects architecture and libc implementation.
 
 ```bash
+# macOS one-liner install:
+curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-macos.sh | bash
+
+# Linux one-liner install:
+curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-linux.sh | sh
+```
+
+```bash
 # Install/update latest
 ./upstall-pwsh-macos.sh  # macOS
 ./upstall-pwsh-linux.sh  # Linux
@@ -56,6 +64,12 @@ Downloads and installs PowerShell from GitHub releases with SHA256 verification.
 
 > [!Important]
 > Run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`), to avoid process-in-use errors.
+
+```powershell
+# Windows one-liner install:
+irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-windows.ps1' |
+    powershell -NoProfile -ExecutionPolicy Bypass -
+```
 
 ```powershell
 # Install/update latest
