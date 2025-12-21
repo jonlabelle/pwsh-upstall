@@ -222,6 +222,204 @@ except Exception:
 PY
 }
 
+get_release_metadata() {
+  _release_url="${1}"
+  _target_suffix="${2}"
+
+  log "Fetching release metadata: ${_release_url}" >&2
+
+  # Use GitHub token if available (avoids rate limiting in CI environments)
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    _json="$(curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${GITHUB_TOKEN}" "${_release_url}")"
+  else
+    _json="$(curl -fsSL --retry 3 --retry-delay 2 "${_release_url}")"
+  fi
+
+  _rel_data="$(
+    "${PYTHON}" - "${_json}" "${_target_suffix}" <<'PY'
+import json, sys, re
+data = json.loads(sys.argv[1])
+target = sys.argv[2]
+
+tag = data.get("tag_name") or ""
+assets = data.get("assets") or []
+candidates = []
+sha_url = ""
+for a in assets:
+    name = a.get("name") or ""
+    url = a.get("browser_download_url") or ""
+    if target in name and name.endswith(".tar.gz"):
+        candidates.append((name, url))
+    elif name.endswith(".tar.gz.sha256") and target in name:
+        sha_url = url
+
+def score(item):
+    name, _ = item
+    w = 0
+    if "preview" in name.lower(): w -= 10
+    if "rc" in name.lower(): w -= 5
+    if re.match(rf"^powershell-.*-{re.escape(target)}$", name): w += 5
+    return w
+
+candidates.sort(key=score, reverse=True)
+if candidates:
+    name, url = candidates[0]
+    # Find corresponding SHA file
+    sha_name = name + ".sha256"
+    for a in assets:
+        if a.get("name") == sha_name:
+            sha_url = a.get("browser_download_url") or ""
+            break
+    print(tag, url, name, sha_url)
+else:
+    print(tag, "", "", "")
+PY
+  )"
+
+  printf '%s\n' "${_rel_data}"
+}
+
+download_and_verify_package() {
+  _pkg_url="${1}"
+  _pkg_path="${2}"
+  _sha_url="${3}"
+
+  if [ -f "${_pkg_path}" ]; then
+    log "Removing existing incomplete download: ${_pkg_path}"
+    rm -f "${_pkg_path}"
+  fi
+
+  log "Downloading to: ${_pkg_path}"
+  run curl -fL --retry 3 --retry-delay 2 -C - -o "${_pkg_path}" "${_pkg_url}"
+
+  if [ "${SKIP_CHECKSUM}" -eq 0 ] && [ -n "${_sha_url}" ]; then
+    need_cmd sha256sum
+    _sha_path="${_pkg_path}.sha256"
+    _dl_dir="$(dirname "${_pkg_path}")"
+    _pkg_name="$(basename "${_pkg_path}")"
+
+    log "Downloading checksum file..."
+    run curl -fsSL --retry 3 --retry-delay 2 -o "${_sha_path}" "${_sha_url}"
+
+    log "Verifying SHA256 checksum..."
+    cd "${_dl_dir}"
+    _expected_sha=$(cat "${_sha_path}" | awk '{print $1}')
+    _actual_sha=$(sha256sum "${_pkg_name}" | awk '{print $1}')
+
+    if [ "${_expected_sha}" != "${_actual_sha}" ]; then
+      echo "ERROR: SHA256 checksum verification failed!" >&2
+      echo "  Expected: ${_expected_sha}" >&2
+      echo "  Got:      ${_actual_sha}" >&2
+      exit 1
+    fi
+    log "SHA256 checksum verified successfully"
+    rm -f "${_sha_path}"
+  elif [ "${SKIP_CHECKSUM}" -eq 0 ]; then
+    log "Warning: SHA256 file not found, skipping checksum verification"
+  fi
+}
+
+install_package() {
+  _pkg_path="${1}"
+  _install_version="${2}"
+  _install_root="/usr/local/microsoft/powershell"
+  _install_path="${_install_root}/${_install_version}"
+
+  run ${SUDO}mkdir -p "${_install_path}"
+  log "Extracting to: ${_install_path}"
+  run ${SUDO}tar -xzf "${_pkg_path}" -C "${_install_path}"
+
+  log "Linking pwsh to /usr/local/bin/pwsh"
+  run ${SUDO}ln -sfn "${_install_path}/pwsh" "/usr/local/bin/pwsh"
+}
+
+main_install() {
+  log "Checking network connectivity..."
+  check_network
+
+  if [ -n "${TAG}" ]; then
+    RELEASE_URL="${API_BASE}/releases/tags/${TAG}"
+  else
+    RELEASE_URL="${API_BASE}/releases/latest"
+  fi
+
+  REL_DATA="$(get_release_metadata "${RELEASE_URL}" "${TARGET_SUFFIX}")"
+
+  REL_TAG=$(printf '%s\n' "${REL_DATA}" | awk '{print $1}')
+  PKG_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $2}')
+  PKG_NAME=$(printf '%s\n' "${REL_DATA}" | awk '{print $3}')
+  SHA_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $4}')
+
+  if [ -z "${PKG_URL}" ]; then
+    echo "ERROR: Could not find a ${TARGET_SUFFIX} asset in that release." >&2
+    exit 1
+  fi
+
+  log "Selected PowerShell release: ${REL_TAG:-<unknown tag>}"
+  log "Selected package: ${PKG_NAME}"
+  log "Download URL: ${PKG_URL}"
+
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "Dry-run summary:"
+    log "  Would download: ${PKG_URL}"
+    log "  Would install : ${PKG_NAME}"
+    log "  Target arch   : ${PKG_ARCH} (musl=${MUSL})"
+    log "  Would verify  : SHA256 checksum"
+    log "  Would install to /usr/local/microsoft/powershell/<version>"
+    trap - EXIT INT TERM
+    exit 0
+  fi
+
+  INSTALLED_VERSION=""
+  if command -v pwsh >/dev/null 2>&1; then
+    # shellcheck disable=SC2016
+    INSTALLED_VERSION="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
+  fi
+
+  if [ "${FORCE}" -eq 0 ] && [ -n "${REL_TAG}" ] && [ -n "${INSTALLED_VERSION}" ]; then
+    DESIRED_VERSION="${REL_TAG#v}"
+    if [ -n "${DESIRED_VERSION}" ]; then
+      compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"
+      _cmp=$?
+      if [ "${_cmp}" -eq 0 ]; then
+        log "PowerShell ${INSTALLED_VERSION} is already installed; use --force to reinstall."
+        exit 0
+      fi
+    fi
+  fi
+
+  check_disk_space "/usr/local" 500
+
+  if [ -n "${OUT_DIR}" ]; then
+    run mkdir -p "${OUT_DIR}"
+    DL_DIR="${OUT_DIR}"
+    TMP_DIR=""
+  else
+    TMP_DIR="$(mktemp -d)"
+    DL_DIR="${TMP_DIR}"
+  fi
+
+  PKG_PATH="${DL_DIR%/}/${PKG_NAME}"
+
+  download_and_verify_package "${PKG_URL}" "${PKG_PATH}" "${SHA_URL}"
+
+  DESIRED_VERSION="${REL_TAG#v}"
+  install_package "${PKG_PATH}" "${DESIRED_VERSION}"
+
+  if [ "${KEEP}" -eq 1 ] || [ -n "${OUT_DIR}" ]; then
+    log "Keeping tarball at: ${PKG_PATH}"
+  else
+    if [ -n "${TMP_DIR}" ]; then
+      log "Cleaning up temporary files..."
+      rm -rf "${TMP_DIR}"
+      TMP_DIR=""
+    fi
+  fi
+
+  trap - EXIT INT TERM
+  log "Done. Verify with: pwsh -v"
+}
+
 while [ $# -gt 0 ]; do
   case "${1}" in
   --tag)
@@ -296,6 +494,26 @@ if [ "${UNINSTALL}" -eq 1 ]; then
     run ${SUDO}rm -f "/usr/local/bin/pwsh"
   fi
   log "Uninstall complete."
+
+  # Check for user-specific directories that may need manual cleanup
+  USER_DIRS=""
+  if [ -d "${HOME}/.config/powershell" ]; then
+    USER_DIRS="${USER_DIRS}  ${HOME}/.config/powershell\n"
+  fi
+  if [ -d "${HOME}/.local/share/powershell" ]; then
+    USER_DIRS="${USER_DIRS}  ${HOME}/.local/share/powershell\n"
+  fi
+  if [ -d "${HOME}/.cache/powershell" ]; then
+    USER_DIRS="${USER_DIRS}  ${HOME}/.cache/powershell\n"
+  fi
+
+  if [ -n "${USER_DIRS}" ]; then
+    log ""
+    log "Note: The following user-specific directories still exist and may be removed manually:"
+    printf "${USER_DIRS}"
+    log "To remove them, run: rm -rf ~/.config/powershell ~/.local/share/powershell ~/.cache/powershell"
+  fi
+
   exit 0
 fi
 
@@ -346,172 +564,4 @@ else
   exit 1
 fi
 
-log "Checking network connectivity..."
-check_network
-
-if [ -n "${TAG}" ]; then
-  RELEASE_URL="${API_BASE}/releases/tags/${TAG}"
-else
-  RELEASE_URL="${API_BASE}/releases/latest"
-fi
-
-log "Fetching release metadata: ${RELEASE_URL}"
-# Use GitHub token if available (avoids rate limiting in CI environments)
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-  JSON="$(curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${GITHUB_TOKEN}" "${RELEASE_URL}")"
-else
-  JSON="$(curl -fsSL --retry 3 --retry-delay 2 "${RELEASE_URL}")"
-fi
-
-REL_DATA="$(
-  "${PYTHON}" - "${JSON}" "${TARGET_SUFFIX}" <<'PY'
-import json, sys, re
-data = json.loads(sys.argv[1])
-target = sys.argv[2]
-
-tag = data.get("tag_name") or ""
-assets = data.get("assets") or []
-candidates = []
-sha_url = ""
-for a in assets:
-    name = a.get("name") or ""
-    url = a.get("browser_download_url") or ""
-    if target in name and name.endswith(".tar.gz"):
-        candidates.append((name, url))
-    elif name.endswith(".tar.gz.sha256") and target in name:
-        sha_url = url
-
-def score(item):
-    name, _ = item
-    w = 0
-    if "preview" in name.lower(): w -= 10
-    if "rc" in name.lower(): w -= 5
-    if re.match(rf"^powershell-.*-{re.escape(target)}$", name): w += 5
-    return w
-
-candidates.sort(key=score, reverse=True)
-if candidates:
-    name, url = candidates[0]
-    # Find corresponding SHA file
-    sha_name = name + ".sha256"
-    for a in assets:
-        if a.get("name") == sha_name:
-            sha_url = a.get("browser_download_url") or ""
-            break
-    print(tag, url, name, sha_url)
-else:
-    print(tag, "", "", "")
-PY
-)"
-
-REL_TAG=$(printf '%s\n' "${REL_DATA}" | awk '{print $1}')
-PKG_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $2}')
-PKG_NAME=$(printf '%s\n' "${REL_DATA}" | awk '{print $3}')
-SHA_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $4}')
-
-if [ -z "${PKG_URL}" ]; then
-  echo "ERROR: Could not find a ${TARGET_SUFFIX} asset in that release." >&2
-  exit 1
-fi
-
-log "Selected PowerShell release: ${REL_TAG:-<unknown tag>}"
-log "Selected package: ${PKG_NAME}"
-log "Download URL: ${PKG_URL}"
-
-if [ "${DRY_RUN}" -eq 1 ]; then
-  log "Dry-run summary:"
-  log "  Would download: ${PKG_URL}"
-  log "  Would install : ${PKG_NAME}"
-  log "  Target arch   : ${PKG_ARCH} (musl=${MUSL})"
-  log "  Would verify  : SHA256 checksum"
-  log "  Would install to /usr/local/microsoft/powershell/<version>"
-  trap - EXIT INT TERM
-  exit 0
-fi
-
-INSTALLED_VERSION=""
-if command -v pwsh >/dev/null 2>&1; then
-  # shellcheck disable=SC2016
-  INSTALLED_VERSION="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
-fi
-
-if [ "${FORCE}" -eq 0 ] && [ -n "${REL_TAG}" ] && [ -n "${INSTALLED_VERSION}" ]; then
-  DESIRED_VERSION="${REL_TAG#v}"
-  if [ -n "${DESIRED_VERSION}" ]; then
-    compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"
-    version_cmp=$?
-    if [ ${version_cmp} -eq 0 ]; then
-      log "PowerShell ${INSTALLED_VERSION} is already installed; use --force to reinstall."
-      trap - EXIT INT TERM
-      exit 0
-    fi
-  fi
-fi
-
-check_disk_space "/usr/local" 500
-
-if [ -n "${OUT_DIR}" ]; then
-  run mkdir -p "${OUT_DIR}"
-  DL_DIR="${OUT_DIR}"
-  TMP_DIR=""
-else
-  TMP_DIR="$(mktemp -d)"
-  DL_DIR="${TMP_DIR}"
-fi
-
-PKG_PATH="${DL_DIR%/}/${PKG_NAME}"
-
-if [ -f "${PKG_PATH}" ]; then
-  log "Removing existing incomplete download: ${PKG_PATH}"
-  rm -f "${PKG_PATH}"
-fi
-
-log "Downloading to: ${PKG_PATH}"
-run curl -fL --retry 3 --retry-delay 2 -C - -o "${PKG_PATH}" "${PKG_URL}"
-
-if [ "${SKIP_CHECKSUM}" -eq 0 ] && [ -n "${SHA_URL}" ]; then
-  need_cmd sha256sum
-  SHA_PATH="${PKG_PATH}.sha256"
-  log "Downloading checksum file..."
-  run curl -fsSL --retry 3 --retry-delay 2 -o "${SHA_PATH}" "${SHA_URL}"
-
-  log "Verifying SHA256 checksum..."
-  cd "${DL_DIR}"
-  EXPECTED_SHA=$(cat "${SHA_PATH}" | awk '{print $1}')
-  ACTUAL_SHA=$(sha256sum "${PKG_NAME}" | awk '{print $1}')
-
-  if [ "${EXPECTED_SHA}" != "${ACTUAL_SHA}" ]; then
-    echo "ERROR: SHA256 checksum verification failed!" >&2
-    echo "  Expected: ${EXPECTED_SHA}" >&2
-    echo "  Got:      ${ACTUAL_SHA}" >&2
-    exit 1
-  fi
-  log "SHA256 checksum verified successfully"
-  rm -f "${SHA_PATH}"
-elif [ "${SKIP_CHECKSUM}" -eq 0 ]; then
-  log "Warning: SHA256 file not found, skipping checksum verification"
-fi
-
-DESIRED_VERSION="${REL_TAG#v}"
-INSTALL_ROOT="/usr/local/microsoft/powershell"
-INSTALL_PATH="${INSTALL_ROOT}/${DESIRED_VERSION}"
-
-run ${SUDO}mkdir -p "${INSTALL_PATH}"
-log "Extracting to: ${INSTALL_PATH}"
-run ${SUDO}tar -xzf "${PKG_PATH}" -C "${INSTALL_PATH}"
-
-log "Linking pwsh to /usr/local/bin/pwsh"
-run ${SUDO}ln -sfn "${INSTALL_PATH}/pwsh" "/usr/local/bin/pwsh"
-
-if [ "${KEEP}" -eq 1 ] || [ -n "${OUT_DIR}" ]; then
-  log "Keeping tarball at: ${PKG_PATH}"
-else
-  if [ -n "${TMP_DIR}" ]; then
-    log "Cleaning up temporary files…"
-    run rm -rf "${TMP_DIR}"
-    TMP_DIR=""
-  fi
-fi
-
-trap - EXIT INT TERM
-log "Done. Verify with: pwsh -v"
+main_install

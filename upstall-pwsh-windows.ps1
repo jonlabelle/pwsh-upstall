@@ -329,6 +329,27 @@ if ($Uninstall)
             Write-Error "Uninstall failed with exit code: $($proc.ExitCode)"
             exit $proc.ExitCode
         }
+
+        # Check for user-specific directories that may need manual cleanup
+        $userDirs = @()
+        $docsPath = Join-Path $env:USERPROFILE 'Documents\PowerShell'
+        $localPath = Join-Path $env:LOCALAPPDATA 'Microsoft\PowerShell'
+        $roamingPath = Join-Path $env:APPDATA 'Microsoft\PowerShell'
+
+        if (Test-Path $docsPath) { $userDirs += $docsPath }
+        if (Test-Path $localPath) { $userDirs += $localPath }
+        if (Test-Path $roamingPath) { $userDirs += $roamingPath }
+
+        if ($userDirs.Count -gt 0)
+        {
+            Write-Host ''
+            Write-Host 'Note: The following user-specific directories still exist and may be removed manually:' -ForegroundColor Yellow
+            foreach ($dir in $userDirs)
+            {
+                Write-Host "  $dir" -ForegroundColor Yellow
+            }
+            Write-Host 'To remove them, run: Remove-Item -Recurse -Force ~\Documents\PowerShell, $env:LOCALAPPDATA\Microsoft\PowerShell, $env:APPDATA\Microsoft\PowerShell' -ForegroundColor Cyan
+        }
     }
     return
 }
