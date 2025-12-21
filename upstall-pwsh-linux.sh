@@ -356,12 +356,12 @@ else
 fi
 
 log "Fetching release metadata: ${RELEASE_URL}"
-CURL_OPTS="-fsSL --retry 3 --retry-delay 2"
 # Use GitHub token if available (avoids rate limiting in CI environments)
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-  CURL_OPTS="${CURL_OPTS} -H 'Authorization: Bearer ${GITHUB_TOKEN}'"
+  JSON="$(curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${GITHUB_TOKEN}" "${RELEASE_URL}")"
+else
+  JSON="$(curl -fsSL --retry 3 --retry-delay 2 "${RELEASE_URL}")"
 fi
-JSON="$(curl ${CURL_OPTS} "${RELEASE_URL}")"
 
 REL_DATA="$(
   "${PYTHON}" - "${JSON}" "${TARGET_SUFFIX}" <<'PY'
