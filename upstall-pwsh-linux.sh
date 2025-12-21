@@ -129,6 +129,7 @@ need_cmd() {
     case "${_cmd}" in
     sha256sum) _pkg="coreutils" ;;
     python3) _pkg="python3" ;;
+    *) _pkg="${_cmd}" ;;
     esac
 
     if command -v apt-get >/dev/null 2>&1; then
