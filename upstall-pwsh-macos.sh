@@ -131,7 +131,7 @@ need_cmd() {
     local pkg="$1"
 
     # Map command names to common package names
-    case "$cmd" in
+    case "${cmd}" in
     shasum)
       echo "Note: shasum is typically included with macOS by default" >&2
       ;;
@@ -145,7 +145,7 @@ need_cmd() {
       ;;
     *)
       if command -v brew >/dev/null 2>&1; then
-        echo "Try: brew install $pkg" >&2
+        echo "Try: brew install ${pkg}" >&2
       else
         echo "Tip: Install Homebrew from https://brew.sh" >&2
       fi
@@ -158,7 +158,7 @@ need_cmd() {
 
 check_network() {
   # Skip network check in dry-run mode to allow preview without connectivity
-  if [ "${DRY_RUN}" -eq 1 ]; then
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
     return 0
   fi
 
@@ -240,6 +240,7 @@ verify_microsoft_signature() {
     pkgutil --check-signature "${pkg_path}" 2>&1 || true
     return 1
   fi
+
   log "Package signature verified: Microsoft Corporation"
   return 0
 }
