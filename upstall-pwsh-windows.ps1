@@ -164,11 +164,13 @@ function Compare-SemanticVersion
 
 function Get-OsArch
 {
-    switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture)
+    $arch = $env:PROCESSOR_ARCHITECTURE
+    switch ($arch)
     {
-        'X64' { 'x64'; break }
-        'Arm64' { 'arm64'; break }
-        default { throw "Unsupported architecture: $PSItem" }
+        'AMD64' { return 'x64' }
+        'x86_64' { return 'x64' }
+        'ARM64' { return 'arm64' }
+        default { throw "Unsupported architecture: $arch" }
     }
 }
 
