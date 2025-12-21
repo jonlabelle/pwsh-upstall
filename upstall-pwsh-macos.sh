@@ -23,7 +23,7 @@ set -euo pipefail
 #   Options:
 #     --tag <tag>        Install specific GitHub release tag (e.g., v7.5.4)
 #     --out-dir <dir>    Save downloaded package to specified directory
-#     --keep-pkg         Retain package after installation
+#     --keep             Retain package after installation
 #     --force            Reinstall even if target version already installed
 #     --uninstall        Remove PowerShell and associated package receipts
 #     --skip-checksum    Skip SHA256 verification (not recommended)
@@ -38,7 +38,7 @@ set -euo pipefail
 #   ./upstall-pwsh-macos.sh --tag v7.5.4
 #
 #   # Download to ~/Downloads and keep package
-#   ./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep-pkg
+#   ./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep
 #
 #   # Uninstall PowerShell
 #   ./upstall-pwsh-macos.sh --uninstall
@@ -60,7 +60,7 @@ API_BASE="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
 
 DRY_RUN=0
 TAG="" # e.g., v7.5.4
-KEEP_PKG=0
+KEEP=0
 OUT_DIR="" # optional destination directory for the downloaded pkg
 FORCE=0
 UNINSTALL=0
@@ -85,7 +85,7 @@ Options:
   --tag <tag>        Install a specific GitHub release tag (e.g., v7.5.4).
                      If omitted, installs the latest stable release.
   --out-dir <dir>    Directory to save the downloaded .pkg (default: temp dir).
-  --keep-pkg         Keep the downloaded .pkg after installation (default: delete unless --out-dir is used).
+  --keep             Keep the downloaded .pkg after installation (default: delete unless --out-dir is used).
   --force            Reinstall even if the target version is already installed.
   --uninstall        Uninstall PowerShell from the default install location.
   --skip-checksum    Skip SHA256 checksum verification (not recommended).
@@ -100,7 +100,7 @@ Examples:
   ./upstall-pwsh-macos.sh --tag v7.5.4
 
   # Download to ~/Downloads and keep the package
-  ./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep-pkg
+  ./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep
 
   # Preview actions only
   ./upstall-pwsh-macos.sh --dry-run
@@ -305,8 +305,8 @@ while [[ $# -gt 0 ]]; do
     OUT_DIR="${2:-}"
     shift 2
     ;;
-  --keep-pkg)
-    KEEP_PKG=1
+  --keep)
+    KEEP=1
     shift
     ;;
   --force)
@@ -556,7 +556,7 @@ run command -v pwsh
 run pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion'
 
 # Cleanup
-if [[ "${KEEP_PKG}" -eq 1 || -n "${OUT_DIR}" ]]; then
+if [[ "${KEEP}" -eq 1 || -n "${OUT_DIR}" ]]; then
   log "Keeping package at: ${PKG_PATH}"
 else
   if [[ -n "${TMP_DIR}" ]]; then

@@ -22,7 +22,7 @@ set -eu
 #   Options:
 #     --tag <tag>        Install specific GitHub release tag (e.g., v7.5.4)
 #     --out-dir <dir>    Save downloaded tarball to specified directory
-#     --keep-tar         Retain tarball after installation
+#     --keep             Retain tarball after installation
 #     --force            Reinstall even if target version already installed
 #     --uninstall        Remove PowerShell from /usr/local/microsoft/powershell
 #     --skip-checksum    Skip SHA256 verification (not recommended)
@@ -59,7 +59,7 @@ API_BASE="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
 DRY_RUN=0
 TAG=""     # e.g., v7.5.4
 OUT_DIR="" # destination directory for the downloaded tarball
-KEEP_TAR=0
+KEEP=0
 FORCE=0
 UNINSTALL=0
 SKIP_CHECKSUM=0
@@ -83,7 +83,7 @@ Options:
   --tag <tag>        Install a specific GitHub release tag (e.g., v7.5.4).
                      If omitted, installs the latest stable release.
   --out-dir <dir>    Directory to save the downloaded tarball (default: temp dir).
-  --keep-tar         Keep the downloaded tarball after installation (default: delete unless --out-dir is used).
+  --keep             Keep the downloaded tarball after installation (default: delete unless --out-dir is used).
   --force            Reinstall even if the target version is already installed.
   --uninstall        Remove PowerShell from the default install location.
   --skip-checksum    Skip SHA256 checksum verification (not recommended).
@@ -232,8 +232,8 @@ while [ $# -gt 0 ]; do
     OUT_DIR="${2:-}"
     shift 2
     ;;
-  --keep-tar)
-    KEEP_TAR=1
+  --keep)
+    KEEP=1
     shift
     ;;
   --force)
@@ -503,7 +503,7 @@ run ${SUDO}tar -xzf "${PKG_PATH}" -C "${INSTALL_PATH}"
 log "Linking pwsh to /usr/local/bin/pwsh"
 run ${SUDO}ln -sfn "${INSTALL_PATH}/pwsh" "/usr/local/bin/pwsh"
 
-if [ "${KEEP_TAR}" -eq 1 ] || [ -n "${OUT_DIR}" ]; then
+if [ "${KEEP}" -eq 1 ] || [ -n "${OUT_DIR}" ]; then
   log "Keeping tarball at: ${PKG_PATH}"
 else
   if [ -n "${TMP_DIR}" ]; then

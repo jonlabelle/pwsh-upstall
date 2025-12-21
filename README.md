@@ -10,17 +10,20 @@ Platform-specific scripts to install/update PowerShell Core from GitHub releases
 
 ## Usage
 
-### macOS
+### macOS & Linux
 
 ```bash
 # Install/update latest
-./upstall-pwsh-macos.sh
+./upstall-pwsh-macos.sh  # macOS
+./upstall-pwsh-linux.sh  # Linux
 
 # Specific version
-./upstall-pwsh-macos.sh --tag v7.5.4
+./upstall-pwsh-macos.sh --tag v7.5.4  # macOS
+./upstall-pwsh-linux.sh --tag v7.5.4  # Linux
 
 # Remove
-./upstall-pwsh-macos.sh --uninstall
+./upstall-pwsh-macos.sh --uninstall  # macOS
+./upstall-pwsh-linux.sh --uninstall  # Linux
 ```
 
 <details>
@@ -30,47 +33,16 @@ Platform-specific scripts to install/update PowerShell Core from GitHub releases
 | ----------------- | ----------------------------------------------- |
 | `--tag <tag>`     | Install specific release version (e.g., v7.5.4) |
 | `--out-dir <dir>` | Save downloaded package to specified directory  |
-| `--keep-pkg`      | Keep the .pkg file after installation           |
+| `--keep`          | Keep the package file after installation        |
 | `--force`         | Reinstall even if version already installed     |
 | `--uninstall`     | Remove PowerShell installation                  |
 | `--skip-checksum` | Skip SHA256 verification (not recommended)      |
 | `-n, --dry-run`   | Show what would happen without executing        |
 | `-h, --help`      | Display help message                            |
 
-The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell).
+**macOS**: The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell).
 
-</details>
-
----
-
-### Linux
-
-```bash
-# Install/update latest
-./upstall-pwsh-linux.sh
-
-# Specific version
-./upstall-pwsh-linux.sh --tag v7.5.4
-
-# Remove
-./upstall-pwsh-linux.sh --uninstall
-```
-
-<details>
-<summary>Options</summary>
-
-| Option            | Description                                     |
-| ----------------- | ----------------------------------------------- |
-| `--tag <tag>`     | Install specific release version (e.g., v7.5.4) |
-| `--out-dir <dir>` | Save downloaded tarball to specified directory  |
-| `--keep-tar`      | Keep the .tar.gz file after installation        |
-| `--force`         | Reinstall even if version already installed     |
-| `--uninstall`     | Remove PowerShell installation                  |
-| `--skip-checksum` | Skip SHA256 verification (not recommended)      |
-| `-n, --dry-run`   | Show what would happen without executing        |
-| `-h, --help`      | Display help message                            |
-
-Detects x64/arm64 and glibc/musl. Installs to `/usr/local/microsoft/powershell/<version>` with symlink at `/usr/local/bin/pwsh`. Works with POSIX sh (including Alpine).
+**Linux**: Detects x64/arm64 and glibc/musl. Installs to `/usr/local/microsoft/powershell/<version>` with symlink at `/usr/local/bin/pwsh`. Works with POSIX sh (including Alpine).
 
 </details>
 
@@ -99,7 +71,7 @@ powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
 | ---------------- | ------------------------------------------------ |
 | `-Tag <tag>`     | Install specific release version (e.g., v7.5.4)  |
 | `-OutDir <path>` | Save downloaded installer to specified directory |
-| `-KeepInstaller` | Keep the .msi file after installation            |
+| `-Keep`          | Keep the .msi file after installation            |
 | `-Force`         | Reinstall even if version already installed      |
 | `-Uninstall`     | Remove PowerShell installation                   |
 | `-SkipChecksum`  | Skip SHA256 verification (not recommended)       |

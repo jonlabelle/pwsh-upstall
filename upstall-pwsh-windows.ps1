@@ -17,7 +17,7 @@
     .PARAMETER OutDir
         Save the downloaded MSI installer to the specified directory. If omitted, uses a temporary directory.
 
-    .PARAMETER KeepInstaller
+    .PARAMETER Keep
         Retain the MSI installer after installation. By default, the installer is deleted unless -OutDir is specified.
 
     .PARAMETER Force
@@ -83,7 +83,7 @@
 param(
     [string]$Tag,
     [string]$OutDir,
-    [switch]$KeepInstaller,
+    [switch]$Keep,
     [switch]$Force,
     [switch]$Uninstall,
     [switch]$SkipChecksum
@@ -440,7 +440,7 @@ try
 }
 finally
 {
-    if (-not $KeepInstaller -and -not $OutDir)
+    if (-not $Keep -and -not $OutDir)
     {
         if ($PSCmdlet.ShouldProcess($dlDir, 'Clean up downloaded installer'))
         {
