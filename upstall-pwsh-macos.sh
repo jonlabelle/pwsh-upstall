@@ -157,6 +157,10 @@ need_cmd() {
 }
 
 check_network() {
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    return 0
+  fi
+
   if ! curl -fsSL --connect-timeout 5 --max-time 10 "https://api.github.com" >/dev/null 2>&1; then
     echo "ERROR: Cannot reach GitHub API. Check your internet connection." >&2
     exit 1

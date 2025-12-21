@@ -98,6 +98,11 @@ $apiBase = "https://api.github.com/repos/$repoOwner/$repoName"
 
 function Test-NetworkConnectivity
 {
+    if ($WhatIfPreference)
+    {
+        return $true
+    }
+
     try
     {
         $null = Invoke-RestMethod -Uri 'https://api.github.com' -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
