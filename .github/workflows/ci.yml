@@ -17,6 +17,8 @@ jobs:
         include:
           - name: ubuntu
             container: ubuntu:latest
+          - name: debian
+            container: debian:latest
           - name: alpine
             container: alpine:latest
           - name: rhel
