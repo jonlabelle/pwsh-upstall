@@ -156,7 +156,14 @@ check_network() {
     return 0
   fi
 
-  if ! curl -fsSL --connect-timeout 5 --max-time 10 "https://api.github.com" >/dev/null 2>&1; then
+  _status=""
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    _status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${GITHUB_TOKEN}" "https://api.github.com" 2>/dev/null || true)"
+  else
+    _status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "https://api.github.com" 2>/dev/null || true)"
+  fi
+
+  if [ -z "${_status}" ] || [ "${_status}" = "000" ] || [ "${_status}" -ge 500 ]; then
     echo "ERROR: Cannot reach GitHub API. Check your internet connection." >&2
     exit 1
   fi
@@ -329,6 +336,7 @@ install_package() {
   run ${SUDO}mkdir -p "${_install_path}"
   log "Extracting to: ${_install_path}"
   run ${SUDO}tar -xzf "${_pkg_path}" -C "${_install_path}"
+  run ${SUDO}chmod +x "${_install_path}/pwsh"
 
   log "Linking pwsh to /usr/local/bin/pwsh"
   run ${SUDO}ln -sfn "${_install_path}/pwsh" "/usr/local/bin/pwsh"

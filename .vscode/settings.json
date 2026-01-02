@@ -17,8 +17,13 @@
   "cSpell.words": [
     "coreutils",
     "distros",
+    "elif",
     "HKLM",
+    "LASTEXITCODE",
+    "libicu",
+    "microdnf",
     "msiexec",
+    "noninteractive",
     "norestart",
     "pacman",
     "pipefail",

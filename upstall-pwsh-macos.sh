@@ -162,7 +162,14 @@ check_network() {
     return 0
   fi
 
-  if ! curl -fsSL --connect-timeout 5 --max-time 10 "https://api.github.com" >/dev/null 2>&1; then
+  local status=""
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${GITHUB_TOKEN}" "https://api.github.com" 2>/dev/null || true)"
+  else
+    status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "https://api.github.com" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "${status}" || "${status}" == "000" || "${status}" -ge 500 ]]; then
     echo "ERROR: Cannot reach GitHub API. Check your internet connection." >&2
     exit 1
   fi

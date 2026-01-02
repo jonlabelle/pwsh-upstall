@@ -10,8 +10,92 @@ on:
 jobs:
   linux:
     runs-on: ubuntu-latest
+    name: linux (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu
+            container: ubuntu:latest
+          - name: alpine
+            container: alpine:latest
+          - name: rhel
+            container: registry.access.redhat.com/ubi9/ubi:latest
+    container:
+      image: ${{ matrix.container }}
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: sh
     steps:
+      - name: Install OS dependencies
+        run: |
+          set -eu
+          CURL_PKG=""
+          ICU_PKG=""
+          if ! command -v curl >/dev/null 2>&1; then
+            CURL_PKG="curl"
+          fi
+          if command -v apt-get >/dev/null 2>&1; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            ICU_PKG="$(apt-cache pkgnames | awk '/^libicu[0-9]+$/{print}' | sort -V | tail -n 1)"
+            if [ -z "${ICU_PKG}" ]; then
+              ICU_PKG="libicu-dev"
+            fi
+            apt-get install -y --no-install-recommends \
+              ca-certificates \
+              ${CURL_PKG} \
+              git \
+              gzip \
+              ${ICU_PKG} \
+              python3 \
+              python3-packaging \
+              tar
+            rm -rf /var/lib/apt/lists/*
+          elif command -v apk >/dev/null 2>&1; then
+            ICU_PKG="icu-libs"
+            apk add --no-cache \
+              ca-certificates \
+              ${CURL_PKG} \
+              git \
+              gzip \
+              ${ICU_PKG} \
+              python3 \
+              py3-packaging \
+              tar
+          elif command -v microdnf >/dev/null 2>&1; then
+            if [ -n "${CURL_PKG}" ]; then
+              CURL_PKG="curl-minimal"
+            fi
+            ICU_PKG="libicu"
+            microdnf install -y \
+              ca-certificates \
+              ${CURL_PKG} \
+              git \
+              gzip \
+              ${ICU_PKG} \
+              python3 \
+              python3-packaging \
+              tar
+            microdnf clean all
+          elif command -v dnf >/dev/null 2>&1; then
+            ICU_PKG="libicu"
+            dnf install -y \
+              ca-certificates \
+              ${CURL_PKG} \
+              git \
+              gzip \
+              ${ICU_PKG} \
+              python3 \
+              python3-packaging \
+              tar
+            dnf clean all
+          else
+            echo "ERROR: Unsupported package manager in container" >&2
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@main
 
@@ -19,7 +103,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          set -eu
           chmod +x upstall-pwsh-linux.sh
           ./upstall-pwsh-linux.sh --dry-run
 
@@ -27,12 +111,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          sudo ./upstall-pwsh-linux.sh --force
+          set -eu
+          ./upstall-pwsh-linux.sh --force
 
       - name: Verify installation
         run: |
-          set -euo pipefail
+          set -eu
           if ! command -v pwsh >/dev/null 2>&1; then
             echo "ERROR: pwsh command not found after installation" >&2
             exit 1
@@ -46,12 +130,12 @@ jobs:
 
       - name: Uninstall PowerShell
         run: |
-          set -euo pipefail
-          sudo ./upstall-pwsh-linux.sh --uninstall || echo "Uninstall completed with warnings"
+          set -eu
+          ./upstall-pwsh-linux.sh --uninstall || echo "Uninstall completed with warnings"
 
       - name: Verify uninstallation
         run: |
-          set -euo pipefail
+          set -eu
           if command -v pwsh >/dev/null 2>&1; then
             echo "Note: pwsh still available (may be system-installed version)"
             pwsh -NoLogo -NoProfile -Command 'Write-Host "Remaining version: $($PSVersionTable.PSVersion)"'
@@ -63,7 +147,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@main
         with:
-          name: linux-logs
+          name: linux-logs-${{ matrix.name }}
           path: ~/.local/share/powershell/
           if-no-files-found: ignore
 
@@ -87,7 +171,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          sudo ./upstall-pwsh-macos.sh --force
+          sudo env GITHUB_TOKEN="${GITHUB_TOKEN}" ./upstall-pwsh-macos.sh --force
 
       - name: Verify installation
         run: |
