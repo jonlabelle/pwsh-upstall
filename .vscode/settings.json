@@ -18,8 +18,10 @@
     "coreutils",
     "distros",
     "elif",
+    "endswith",
     "HKLM",
     "LASTEXITCODE",
+    "libc",
     "libicu",
     "microdnf",
     "msiexec",
@@ -27,6 +29,8 @@
     "norestart",
     "pacman",
     "pipefail",
+    "pkgnames",
+    "pkgs",
     "upstall"
   ]
 }
