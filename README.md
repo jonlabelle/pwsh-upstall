@@ -27,6 +27,10 @@ curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/
 ./upstall-pwsh-macos.sh  # macOS
 ./upstall-pwsh-linux.sh  # Linux
 
+# Check if PowerShell is up to date
+./upstall-pwsh-macos.sh --check  # macOS
+./upstall-pwsh-linux.sh --check  # Linux
+
 # Specific version
 ./upstall-pwsh-macos.sh --tag v7.5.4  # macOS
 ./upstall-pwsh-linux.sh --tag v7.5.4  # Linux
@@ -45,6 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/
 | `--out-dir <dir>` | Save downloaded package to specified directory  |
 | `--keep`          | Keep the package file after installation        |
 | `--force`         | Reinstall even if version already installed     |
+| `--check`         | Only check if installed version is up to date   |
 | `--uninstall`     | Remove PowerShell installation                  |
 | `--skip-checksum` | Skip SHA256 verification (not recommended)      |
 | `-n, --dry-run`   | Show what would happen without executing        |
@@ -75,6 +80,9 @@ irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/u
 # Install/update latest
 powershell -File .\upstall-pwsh-windows.ps1
 
+# Check if PowerShell is up to date
+powershell -File .\upstall-pwsh-windows.ps1 -Check
+
 # Specific version
 powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
 
@@ -91,6 +99,7 @@ powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
 | `-OutDir <path>` | Save downloaded installer to specified directory |
 | `-Keep`          | Keep the .msi file after installation            |
 | `-Force`         | Reinstall even if version already installed      |
+| `-Check`         | Only check if installed version is up to date    |
 | `-Uninstall`     | Remove PowerShell installation                   |
 | `-SkipChecksum`  | Skip SHA256 verification (not recommended)       |
 | `-WhatIf`        | Show what would happen without executing         |

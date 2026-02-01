@@ -25,6 +25,7 @@ set -euo pipefail
 #     --out-dir <dir>    Save downloaded package to specified directory
 #     --keep             Retain package after installation
 #     --force            Reinstall even if target version already installed
+#     --check            Only check if installed version is up to date
 #     --uninstall        Remove PowerShell and associated package receipts
 #     --skip-checksum    Skip SHA256 verification (not recommended)
 #     -n, --dry-run      Preview actions without making changes
@@ -39,6 +40,9 @@ set -euo pipefail
 #
 #   # Download to ~/Downloads and keep package
 #   ./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep
+#
+#   # Check if PowerShell is up to date
+#   ./upstall-pwsh-macos.sh --check
 #
 #   # Uninstall PowerShell
 #   ./upstall-pwsh-macos.sh --uninstall
@@ -65,6 +69,7 @@ OUT_DIR="" # optional destination directory for the downloaded pkg
 FORCE=0
 UNINSTALL=0
 SKIP_CHECKSUM=0
+CHECK_ONLY=0
 TMP_DIR=""
 
 cleanup_on_error() {
@@ -87,6 +92,7 @@ Options:
   --out-dir <dir>    Directory to save the downloaded .pkg (default: temp dir).
   --keep             Keep the downloaded .pkg after installation (default: delete unless --out-dir is used).
   --force            Reinstall even if the target version is already installed.
+  --check            Only check if installed version is up to date; no download or install.
   --uninstall        Uninstall PowerShell from the default install location.
   --skip-checksum    Skip SHA256 checksum verification (not recommended).
   -n, --dry-run      Show what would happen, but do not download or install.
@@ -104,6 +110,9 @@ Examples:
 
   # Preview actions only
   ./upstall-pwsh-macos.sh --dry-run
+
+  # Check if PowerShell is up to date
+  ./upstall-pwsh-macos.sh --check
 
   # Reinstall even if already on the target version
   ./upstall-pwsh-macos.sh --force
@@ -358,6 +367,55 @@ install_package() {
   run pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion'
 }
 
+check_latest() {
+  log "Checking network connectivity..."
+  check_network
+
+  local release_url="${API_BASE}/releases/latest"
+  local target_pkg_suffix="osx-${PKG_ARCH}.pkg"
+  local rel_tag pkg_url pkg_name sha_url
+  read -r rel_tag pkg_url pkg_name sha_url < <(get_release_metadata "${release_url}" "${target_pkg_suffix}")
+
+  if [[ -z "${pkg_url}" ]]; then
+    echo "ERROR: Could not find an ${target_pkg_suffix} asset in the latest release." >&2
+    exit 1
+  fi
+
+  local desired_version="${rel_tag#v}"
+  if [[ -z "${desired_version}" ]]; then
+    echo "ERROR: Could not determine latest PowerShell release tag." >&2
+    exit 1
+  fi
+
+  log "Latest PowerShell release: ${rel_tag}"
+  log "Latest package: ${pkg_name}"
+
+  local installed_version=""
+  if command -v pwsh >/dev/null 2>&1; then
+    # shellcheck disable=SC2016
+    installed_version="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
+  fi
+
+  if [[ -z "${installed_version}" ]]; then
+    log "PowerShell is not installed."
+    log "Latest available: ${desired_version}"
+    exit 2
+  fi
+
+  compare_versions "${installed_version}" "${desired_version}"
+  local version_cmp=$?
+  if [[ ${version_cmp} -eq 0 ]]; then
+    log "PowerShell ${installed_version} is up to date (latest: ${desired_version})."
+    exit 0
+  elif [[ ${version_cmp} -eq 1 ]]; then
+    log "Update available: ${installed_version} -> ${desired_version}."
+    exit 1
+  else
+    log "Installed version ${installed_version} is newer than latest release ${desired_version}."
+    exit 0
+  fi
+}
+
 main_install() {
   log "Checking network connectivity..."
   check_network
@@ -547,6 +605,10 @@ while [[ $# -gt 0 ]]; do
     FORCE=1
     shift
     ;;
+  --check)
+    CHECK_ONLY=1
+    shift
+    ;;
   --uninstall)
     UNINSTALL=1
     shift
@@ -571,12 +633,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "${CHECK_ONLY}" -eq 1 ]]; then
+  if [[ -n "${TAG}" || -n "${OUT_DIR}" || "${KEEP}" -eq 1 || "${FORCE}" -eq 1 || "${UNINSTALL}" -eq 1 || "${SKIP_CHECKSUM}" -eq 1 ]]; then
+    echo "ERROR: --check cannot be combined with install/uninstall options." >&2
+    exit 1
+  fi
+fi
+
 need_cmd uname
 
 if [[ "${UNINSTALL}" -eq 0 ]]; then
   need_cmd curl
-  need_cmd pkgutil
-  need_cmd installer
+  if [[ "${CHECK_ONLY}" -eq 0 ]]; then
+    need_cmd pkgutil
+    need_cmd installer
+  fi
 fi
 
 if [[ "${UNINSTALL}" -eq 1 ]]; then
@@ -616,6 +687,17 @@ else
   fi
 
   exit 1
+fi
+
+if [[ "${CHECK_ONLY}" -eq 1 ]]; then
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    log "Dry-run summary:"
+    log "  Would check latest PowerShell release for osx-${PKG_ARCH}.pkg"
+    log "  Would compare against installed pwsh version (if present)"
+    trap - EXIT INT TERM
+    exit 0
+  fi
+  check_latest
 fi
 
 main_install

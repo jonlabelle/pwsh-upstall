@@ -24,6 +24,7 @@ set -eu
 #     --out-dir <dir>    Save downloaded tarball to specified directory
 #     --keep             Retain tarball after installation
 #     --force            Reinstall even if target version already installed
+#     --check            Only check if installed version is up to date
 #     --uninstall        Remove PowerShell from /usr/local/microsoft/powershell
 #     --skip-checksum    Skip SHA256 verification (not recommended)
 #     -n, --dry-run      Preview actions without making changes
@@ -38,6 +39,9 @@ set -eu
 #
 #   # Preview installation without making changes
 #   ./upstall-pwsh-linux.sh --dry-run
+#
+#   # Check if PowerShell is up to date
+#   ./upstall-pwsh-linux.sh --check
 #
 #   # Uninstall PowerShell
 #   ./upstall-pwsh-linux.sh --uninstall
@@ -63,6 +67,7 @@ KEEP=0
 FORCE=0
 UNINSTALL=0
 SKIP_CHECKSUM=0
+CHECK_ONLY=0
 TMP_DIR=""
 
 cleanup_on_error() {
@@ -85,6 +90,7 @@ Options:
   --out-dir <dir>    Directory to save the downloaded tarball (default: temp dir).
   --keep             Keep the downloaded tarball after installation (default: delete unless --out-dir is used).
   --force            Reinstall even if the target version is already installed.
+  --check            Only check if installed version is up to date; no download or install.
   --uninstall        Remove PowerShell from the default install location.
   --skip-checksum    Skip SHA256 checksum verification (not recommended).
   -n, --dry-run      Show what would happen, but do not download or install.
@@ -99,6 +105,9 @@ Examples:
 
   # Preview actions only
   ./upstall-pwsh-linux.sh --dry-run
+
+  # Check if PowerShell is up to date
+  ./upstall-pwsh-linux.sh --check
 
   # Reinstall even if already on the target version
   ./upstall-pwsh-linux.sh --force
@@ -342,6 +351,58 @@ install_package() {
   run ${SUDO}ln -sfn "${_install_path}/pwsh" "/usr/local/bin/pwsh"
 }
 
+check_latest() {
+  log "Checking network connectivity..."
+  check_network
+
+  RELEASE_URL="${API_BASE}/releases/latest"
+
+  REL_DATA="$(get_release_metadata "${RELEASE_URL}" "${TARGET_SUFFIX}")"
+
+  REL_TAG=$(printf '%s\n' "${REL_DATA}" | awk '{print $1}')
+  PKG_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $2}')
+  PKG_NAME=$(printf '%s\n' "${REL_DATA}" | awk '{print $3}')
+
+  if [ -z "${PKG_URL}" ]; then
+    echo "ERROR: Could not find a ${TARGET_SUFFIX} asset in the latest release." >&2
+    exit 1
+  fi
+
+  DESIRED_VERSION="${REL_TAG#v}"
+  if [ -z "${DESIRED_VERSION}" ]; then
+    echo "ERROR: Could not determine latest PowerShell release tag." >&2
+    exit 1
+  fi
+
+  log "Latest PowerShell release: ${REL_TAG}"
+  log "Latest package: ${PKG_NAME}"
+
+  INSTALLED_VERSION=""
+  if command -v pwsh >/dev/null 2>&1; then
+    # shellcheck disable=SC2016
+    INSTALLED_VERSION="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
+  fi
+
+  if [ -z "${INSTALLED_VERSION}" ]; then
+    log "PowerShell is not installed."
+    log "Latest available: ${DESIRED_VERSION}"
+    exit 2
+  fi
+
+  compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"
+  _cmp=$?
+  if [ "${_cmp}" -eq 0 ]; then
+    log "PowerShell ${INSTALLED_VERSION} is up to date (latest: ${DESIRED_VERSION})."
+    exit 0
+  elif [ "${_cmp}" -eq 1 ]; then
+    log "Update available: ${INSTALLED_VERSION} -> ${DESIRED_VERSION}."
+    exit 1
+  else
+    log "Installed version ${INSTALLED_VERSION} is newer than latest release ${DESIRED_VERSION}."
+    exit 0
+  fi
+}
+
 main_install() {
   log "Checking network connectivity..."
   check_network
@@ -447,6 +508,10 @@ while [ $# -gt 0 ]; do
     FORCE=1
     shift
     ;;
+  --check)
+    CHECK_ONLY=1
+    shift
+    ;;
   --uninstall)
     UNINSTALL=1
     shift
@@ -471,23 +536,38 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ "${CHECK_ONLY}" -eq 1 ]; then
+  if [ -n "${TAG}" ] || [ -n "${OUT_DIR}" ] || [ "${KEEP}" -eq 1 ] || [ "${FORCE}" -eq 1 ] || [ "${UNINSTALL}" -eq 1 ] || [ "${SKIP_CHECKSUM}" -eq 1 ]; then
+    echo "ERROR: --check cannot be combined with install/uninstall options." >&2
+    exit 1
+  fi
+fi
+
 SUDO=""
-if [ "$(id -u)" -ne 0 ]; then
-  if command -v sudo >/dev/null 2>&1; then
-    SUDO="sudo"
-  else
-    if [ "${DRY_RUN}" -eq 1 ]; then
+if [ "${CHECK_ONLY}" -eq 0 ]; then
+  if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1; then
       SUDO="sudo"
     else
-      echo "ERROR: this script needs root privileges (installing to /usr/local). Please run as root or install sudo." >&2
-      exit 1
+      if [ "${DRY_RUN}" -eq 1 ]; then
+        SUDO="sudo"
+      else
+        echo "ERROR: this script needs root privileges (installing to /usr/local). Please run as root or install sudo." >&2
+        exit 1
+      fi
     fi
   fi
 fi
 
 need_cmd uname
-need_cmd curl
-need_cmd tar
+
+if [ "${UNINSTALL}" -eq 0 ]; then
+  need_cmd curl
+fi
+
+if [ "${UNINSTALL}" -eq 0 ] && [ "${CHECK_ONLY}" -eq 0 ]; then
+  need_cmd tar
+fi
 
 if [ "${UNINSTALL}" -eq 1 ]; then
   trap - EXIT INT TERM
@@ -571,6 +651,17 @@ else
   fi
 
   exit 1
+fi
+
+if [ "${CHECK_ONLY}" -eq 1 ]; then
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "Dry-run summary:"
+    log "  Would check latest PowerShell release for ${TARGET_SUFFIX}"
+    log "  Would compare against installed pwsh version (if present)"
+    trap - EXIT INT TERM
+    exit 0
+  fi
+  check_latest
 fi
 
 main_install

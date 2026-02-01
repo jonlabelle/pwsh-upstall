@@ -23,6 +23,9 @@
     .PARAMETER Force
         Reinstall even if the target version is already installed.
 
+    .PARAMETER Check
+        Only check if the installed version is up to date with the latest available release.
+
     .PARAMETER Uninstall
         Remove PowerShell using the MSI uninstall string from the Windows registry.
 
@@ -43,6 +46,10 @@
     .EXAMPLE
         powershell -File .\upstall-pwsh-windows.ps1 -Force
         Reinstall the latest version even if already installed.
+
+    .EXAMPLE
+        powershell -File .\upstall-pwsh-windows.ps1 -Check
+        Check if PowerShell is up to date.
 
     .EXAMPLE
         powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
@@ -85,6 +92,7 @@ param(
     [string]$OutDir,
     [switch]$Keep,
     [switch]$Force,
+    [switch]$Check,
     [switch]$Uninstall,
     [switch]$SkipChecksum
 )
@@ -95,6 +103,12 @@ $ProgressPreference = 'SilentlyContinue'
 $repoOwner = 'PowerShell'
 $repoName = 'PowerShell'
 $apiBase = "https://api.github.com/repos/$repoOwner/$repoName"
+
+if ($Check -and ($Tag -or $OutDir -or $Keep -or $Force -or $Uninstall -or $SkipChecksum))
+{
+    Write-Error 'The -Check option cannot be combined with install/uninstall options.'
+    exit 1
+}
 
 function Test-NetworkConnectivity
 {
@@ -280,6 +294,51 @@ function Get-InstalledPwshVersion
 
 $arch = Get-OsArch
 Write-Verbose "Detected architecture: $arch"
+
+if ($Check)
+{
+    Write-Host 'Checking network connectivity...'
+    if (-not (Test-NetworkConnectivity))
+    {
+        exit 1
+    }
+
+    $release = Get-Release -TagName $null
+    $null = Select-Asset -Release $release -Arch $arch
+
+    $releaseTag = $release.tag_name
+    $latestVersion = $releaseTag.TrimStart('v')
+
+    if (-not $latestVersion)
+    {
+        Write-Error 'Could not determine latest PowerShell release tag.'
+        exit 1
+    }
+
+    $installed = Get-InstalledPwshVersion
+    if (-not $installed)
+    {
+        Write-Host "PowerShell is not installed. Latest available: $latestVersion" -ForegroundColor Yellow
+        exit 2
+    }
+
+    $cmp = Compare-SemanticVersion -Version1 $installed -Version2 $latestVersion
+    if ($cmp -eq 0)
+    {
+        Write-Host "PowerShell $installed is up to date (latest: $latestVersion)."
+        exit 0
+    }
+    elseif ($cmp -lt 0)
+    {
+        Write-Host "Update available: installed $installed -> latest $latestVersion." -ForegroundColor Yellow
+        exit 1
+    }
+    else
+    {
+        Write-Host "Installed version $installed is newer than latest release $latestVersion." -ForegroundColor Yellow
+        exit 0
+    }
+}
 
 # Warn if running from pwsh (PowerShell Core) when trying to upgrade
 if (-not $Uninstall)
