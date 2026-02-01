@@ -5,7 +5,7 @@
         Install, upgrade, or uninstall Microsoft PowerShell on Windows from GitHub Releases.
 
     .DESCRIPTION
-        PowerShell script to install, upgrade, or uninstall Microsoft PowerShell (Core) on Windows
+        PowerShell Desktop script to install, upgrade, or uninstall Microsoft PowerShell (Core) on Windows
         using official MSI packages from GitHub Releases. Supports both x86_64 and ARM64 architectures.
 
         IMPORTANT: Run this script from Windows PowerShell (powershell.exe), not PowerShell Core (pwsh.exe),
