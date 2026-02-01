@@ -104,6 +104,24 @@ $repoOwner = 'PowerShell'
 $repoName = 'PowerShell'
 $apiBase = "https://api.github.com/repos/$repoOwner/$repoName"
 
+function Write-Info
+{
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Cyan
+}
+
+function Write-Warn
+{
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Yellow
+}
+
+function Write-Success
+{
+    param([string]$Message)
+    Write-Host $Message -ForegroundColor Green
+}
+
 if ($Check -and ($Tag -or $OutDir -or $Keep -or $Force -or $Uninstall -or $SkipChecksum))
 {
     Write-Error 'The -Check option cannot be combined with install/uninstall options.'
@@ -297,7 +315,7 @@ Write-Verbose "Detected architecture: $arch"
 
 if ($Check)
 {
-    Write-Host 'Checking network connectivity...'
+    Write-Info 'Checking network connectivity...'
     if (-not (Test-NetworkConnectivity))
     {
         exit 1
@@ -318,24 +336,24 @@ if ($Check)
     $installed = Get-InstalledPwshVersion
     if (-not $installed)
     {
-        Write-Host "PowerShell is not installed. Latest available: $latestVersion" -ForegroundColor Yellow
+        Write-Warn "PowerShell is not installed. Latest available: $latestVersion"
         exit 2
     }
 
     $cmp = Compare-SemanticVersion -Version1 $installed -Version2 $latestVersion
     if ($cmp -eq 0)
     {
-        Write-Host "PowerShell $installed is up to date (latest: $latestVersion)."
+        Write-Success "PowerShell $installed is up to date (latest: $latestVersion)."
         exit 0
     }
     elseif ($cmp -lt 0)
     {
-        Write-Host "Update available: installed $installed -> latest $latestVersion." -ForegroundColor Yellow
+        Write-Warn "Update available: installed $installed -> latest $latestVersion."
         exit 1
     }
     else
     {
-        Write-Host "Installed version $installed is newer than latest release $latestVersion." -ForegroundColor Yellow
+        Write-Warn "Installed version $installed is newer than latest release $latestVersion."
         exit 0
     }
 }
@@ -364,10 +382,10 @@ if ($Uninstall)
     $info = Get-PwshUninstallInfo
     if (-not $info -or -not $info.DisplayName -or -not $info.UninstallString)
     {
-        Write-Host 'No PowerShell install found via MSI uninstall entries.' -ForegroundColor Yellow
+        Write-Warn 'No PowerShell install found via MSI uninstall entries.'
         return
     }
-    Write-Host "Found PowerShell install: $($info.DisplayName)"
+    Write-Info "Found PowerShell install: $($info.DisplayName)"
     if ($PSCmdlet.ShouldProcess($info.DisplayName, "Uninstall via $($info.UninstallString)"))
     {
         $exe = $info.UninstallString
@@ -402,18 +420,18 @@ if ($Uninstall)
         if ($userDirs.Count -gt 0)
         {
             Write-Host ''
-            Write-Host 'Note: The following user-specific directories still exist and may be removed manually:' -ForegroundColor Yellow
+            Write-Warn 'Note: The following user-specific directories still exist and may be removed manually:'
             foreach ($dir in $userDirs)
             {
-                Write-Host "  $dir" -ForegroundColor Yellow
+                Write-Warn "  $dir"
             }
-            Write-Host 'To remove them, run: Remove-Item -Recurse -Force ~\Documents\PowerShell, $env:LOCALAPPDATA\Microsoft\PowerShell, $env:APPDATA\Microsoft\PowerShell' -ForegroundColor Cyan
+            Write-Info 'To remove them, run: Remove-Item -Recurse -Force ~\Documents\PowerShell, $env:LOCALAPPDATA\Microsoft\PowerShell, $env:APPDATA\Microsoft\PowerShell'
         }
     }
     return
 }
 
-Write-Host 'Checking network connectivity...'
+Write-Info 'Checking network connectivity...'
 if (-not (Test-NetworkConnectivity))
 {
     exit 1
@@ -426,9 +444,9 @@ $shaAsset = $assetInfo.ShaAsset
 $releaseTag = $release.tag_name
 $targetVersion = $releaseTag.TrimStart('v')
 
-Write-Host "Selected PowerShell release: $releaseTag"
-Write-Host "Selected installer: $($asset.name)"
-Write-Host "Download URL: $($asset.browser_download_url)"
+Write-Info "Selected PowerShell release: $releaseTag"
+Write-Info "Selected installer: $($asset.name)"
+Write-Info "Download URL: $($asset.browser_download_url)"
 
 $dlDir = if ($OutDir)
 {
@@ -449,7 +467,7 @@ if (-not $Force)
         $cmp = Compare-SemanticVersion -Version1 $installed -Version2 $targetVersion
         if ($cmp -eq 0)
         {
-            Write-Host "PowerShell $installed is already installed; use -Force to reinstall." -ForegroundColor Yellow
+            Write-Warn "PowerShell $installed is already installed; use -Force to reinstall."
             return
         }
     }
@@ -480,13 +498,13 @@ try
     if (-not $SkipChecksum -and $shaAsset)
     {
         $shaPath = "$installerPath.sha256"
-        Write-Host 'Downloading checksum file...'
+        Write-Info 'Downloading checksum file...'
         if ($PSCmdlet.ShouldProcess($shaPath, 'Download SHA256 checksum'))
         {
             Invoke-WebRequest -Uri $shaAsset.browser_download_url -OutFile $shaPath
         }
 
-        Write-Host 'Verifying SHA256 checksum...'
+        Write-Info 'Verifying SHA256 checksum...'
         $expectedSha = (Get-Content $shaPath -Raw).Split()[0]
         $actualSha = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash
 
@@ -497,7 +515,7 @@ try
             Write-Error "  Got:      $actualSha"
             exit 1
         }
-        Write-Host 'SHA256 checksum verified successfully'
+        Write-Success 'SHA256 checksum verified successfully'
         Remove-Item -Force $shaPath
     }
     elseif (-not $SkipChecksum)
@@ -515,7 +533,7 @@ try
             Write-Error "MSI installation failed with exit code: $($proc.ExitCode)"
             exit $proc.ExitCode
         }
-        Write-Host "PowerShell $targetVersion installed successfully"
+        Write-Success "PowerShell $targetVersion installed successfully"
     }
 }
 finally
@@ -529,4 +547,4 @@ finally
     }
 }
 
-Write-Host 'Done. Verify with: pwsh -v'
+Write-Success 'Done. Verify with: pwsh -v'

@@ -72,6 +72,21 @@ SKIP_CHECKSUM=0
 CHECK_ONLY=0
 TMP_DIR=""
 
+# ANSI colors (disabled when not on a TTY or NO_COLOR is set)
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  C_RESET="$(printf '\033[0m')"
+  C_RED="$(printf '\033[31m')"
+  C_GREEN="$(printf '\033[32m')"
+  C_YELLOW="$(printf '\033[33m')"
+  C_CYAN="$(printf '\033[36m')"
+else
+  C_RESET=""
+  C_RED=""
+  C_GREEN=""
+  C_YELLOW=""
+  C_CYAN=""
+fi
+
 cleanup_on_error() {
   if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
     log "Cleaning up temporary files due to error..."
@@ -123,6 +138,10 @@ USAGE
 }
 
 log() { printf '%s\n' "$*"; }
+log_info() { printf '%s\n' "${C_CYAN}$*${C_RESET}"; }
+log_warn() { printf '%s\n' "${C_YELLOW}$*${C_RESET}"; }
+log_success() { printf '%s\n' "${C_GREEN}$*${C_RESET}"; }
+log_error() { printf '%s\n' "${C_RED}$*${C_RESET}" >&2; }
 run() {
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     log "[dry-run] $*"
@@ -133,7 +152,7 @@ run() {
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
-    echo "ERROR: missing required command: $1" >&2
+    log_error "ERROR: missing required command: $1"
 
     # Suggest installation command based on available package manager
     local cmd="$1"
@@ -179,7 +198,7 @@ check_network() {
   fi
 
   if [[ -z "${status}" || "${status}" == "000" || "${status}" -ge 500 ]]; then
-    echo "ERROR: Cannot reach GitHub API. Check your internet connection." >&2
+    log_error "ERROR: Cannot reach GitHub API. Check your internet connection."
     exit 1
   fi
 }
@@ -189,7 +208,7 @@ check_disk_space() {
   local required_mb="${2:-500}"
 
   if ! command -v df >/dev/null 2>&1; then
-    log "Warning: 'df' command not found, skipping disk space check"
+    log_warn "Warning: 'df' command not found, skipping disk space check"
     return 0
   fi
 
@@ -197,18 +216,18 @@ check_disk_space() {
   available_kb=$(df -k "${target_dir}" 2>/dev/null | awk 'NR==2 {print $4}')
 
   if [[ -z "${available_kb}" ]]; then
-    log "Warning: Could not determine available disk space"
+    log_warn "Warning: Could not determine available disk space"
     return 0
   fi
 
   local available_mb=$((available_kb / 1024))
 
   if [[ "${available_mb}" -lt "${required_mb}" ]]; then
-    echo "ERROR: Insufficient disk space. Required: ${required_mb}MB, Available: ${available_mb}MB" >&2
+    log_error "ERROR: Insufficient disk space. Required: ${required_mb}MB, Available: ${available_mb}MB"
     exit 1
   fi
 
-  log "Disk space check passed: ${available_mb}MB available"
+  log_success "Disk space check passed: ${available_mb}MB available"
 }
 
 compare_versions() {
@@ -314,7 +333,7 @@ download_and_verify_package() {
     rm -f "${pkg_path}"
   fi
 
-  log "Downloading to: ${pkg_path}"
+  log_info "Downloading to: ${pkg_path}"
   run curl -fL --retry 3 --retry-delay 2 -C - -o "${pkg_path}" "${pkg_url}"
 
   # Verify SHA256 checksum
@@ -325,50 +344,50 @@ download_and_verify_package() {
     dl_dir="$(dirname "${pkg_path}")"
     pkg_name="$(basename "${pkg_path}")"
 
-    log "Downloading checksum file..."
+    log_info "Downloading checksum file..."
     run curl -fsSL --retry 3 --retry-delay 2 -o "${sha_path}" "${sha_url}"
 
-    log "Verifying SHA256 checksum..."
+    log_info "Verifying SHA256 checksum..."
     cd "${dl_dir}"
     local expected_sha actual_sha
     expected_sha=$(cat "${sha_path}" | awk '{print $1}')
     actual_sha=$(shasum -a 256 "${pkg_name}" | awk '{print $1}')
 
     if [[ "${expected_sha}" != "${actual_sha}" ]]; then
-      echo "ERROR: SHA256 checksum verification failed!" >&2
-      echo "  Expected: ${expected_sha}" >&2
-      echo "  Got:      ${actual_sha}" >&2
+      log_error "ERROR: SHA256 checksum verification failed!"
+      log_error "  Expected: ${expected_sha}"
+      log_error "  Got:      ${actual_sha}"
       exit 1
     fi
-    log "SHA256 checksum verified successfully"
+    log_success "SHA256 checksum verified successfully"
     rm -f "${sha_path}"
   elif [[ "${SKIP_CHECKSUM}" -eq 0 ]]; then
-    log "Warning: SHA256 file not found, skipping checksum verification"
+    log_warn "Warning: SHA256 file not found, skipping checksum verification"
   fi
 
   # Verify Microsoft signature
-  log "Checking package signature..."
+  log_info "Checking package signature..."
   run pkgutil --check-signature "${pkg_path}"
   if [[ "${DRY_RUN}" -eq 0 ]]; then
-    verify_microsoft_signature "${pkg_path}" || log "Warning: Could not verify Microsoft signature"
+    verify_microsoft_signature "${pkg_path}" || log_warn "Warning: Could not verify Microsoft signature"
   fi
 }
 
 install_package() {
   local pkg_path="${1}"
 
-  log "Installing PowerShell (requires sudo)…"
+  log_info "Installing PowerShell (requires sudo)…"
   run sudo installer -pkg "${pkg_path}" -target /
 
   # Verify
-  log "Verifying installation…"
+  log_info "Verifying installation…"
   run command -v pwsh
   # shellcheck disable=SC2016
   run pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion'
 }
 
 check_latest() {
-  log "Checking network connectivity..."
+  log_info "Checking network connectivity..."
   check_network
 
   local release_url="${API_BASE}/releases/latest"
@@ -377,13 +396,13 @@ check_latest() {
   read -r rel_tag pkg_url pkg_name sha_url < <(get_release_metadata "${release_url}" "${target_pkg_suffix}")
 
   if [[ -z "${pkg_url}" ]]; then
-    echo "ERROR: Could not find an ${target_pkg_suffix} asset in the latest release." >&2
+    log_error "ERROR: Could not find an ${target_pkg_suffix} asset in the latest release."
     exit 1
   fi
 
   local desired_version="${rel_tag#v}"
   if [[ -z "${desired_version}" ]]; then
-    echo "ERROR: Could not determine latest PowerShell release tag." >&2
+    log_error "ERROR: Could not determine latest PowerShell release tag."
     exit 1
   fi
 
@@ -397,27 +416,27 @@ check_latest() {
   fi
 
   if [[ -z "${installed_version}" ]]; then
-    log "PowerShell is not installed."
-    log "Latest available: ${desired_version}"
+    log_warn "PowerShell is not installed."
+    log_info "Latest available: ${desired_version}"
     exit 2
   fi
 
   compare_versions "${installed_version}" "${desired_version}"
   local version_cmp=$?
   if [[ ${version_cmp} -eq 0 ]]; then
-    log "PowerShell ${installed_version} is up to date (latest: ${desired_version})."
+    log_success "PowerShell ${installed_version} is up to date (latest: ${desired_version})."
     exit 0
   elif [[ ${version_cmp} -eq 1 ]]; then
-    log "Update available: ${installed_version} -> ${desired_version}."
+    log_warn "Update available: ${installed_version} -> ${desired_version}."
     exit 1
   else
-    log "Installed version ${installed_version} is newer than latest release ${desired_version}."
+    log_warn "Installed version ${installed_version} is newer than latest release ${desired_version}."
     exit 0
   fi
 }
 
 main_install() {
-  log "Checking network connectivity..."
+  log_info "Checking network connectivity..."
   check_network
 
   # Decide which API endpoint to hit
@@ -433,8 +452,8 @@ main_install() {
   read -r rel_tag pkg_url pkg_name sha_url < <(get_release_metadata "${release_url}" "${target_pkg_suffix}")
 
   if [[ -z "${pkg_url}" ]]; then
-    echo "ERROR: Could not find an ${target_pkg_suffix} asset in that release." >&2
-    echo "Tip: Try specifying --tag (e.g., --tag v7.5.4) or check the release assets in the browser." >&2
+    log_error "ERROR: Could not find an ${target_pkg_suffix} asset in that release."
+    log_error "Tip: Try specifying --tag (e.g., --tag v7.5.4) or check the release assets in the browser."
     exit 1
   fi
 
@@ -465,7 +484,7 @@ main_install() {
         compare_versions "${installed_version}" "${desired_version}"
         local version_cmp=$?
         if [[ ${version_cmp} -eq 0 ]]; then
-          log "PowerShell ${installed_version} is already installed; skipping install. Use --force to reinstall."
+          log_warn "PowerShell ${installed_version} is already installed; skipping install. Use --force to reinstall."
           trap - EXIT INT TERM
           exit 0
         fi
@@ -496,28 +515,28 @@ main_install() {
     log "Keeping package at: ${pkg_path}"
   else
     if [[ -n "${TMP_DIR}" ]]; then
-      log "Cleaning up temporary files…"
+      log_info "Cleaning up temporary files…"
       run rm -rf "${TMP_DIR}"
       TMP_DIR=""
     fi
   fi
 
   trap - EXIT INT TERM
-  log "Done."
+  log_success "Done."
 }
 
 verify_microsoft_signature() {
   local pkg_path="${1}"
 
-  log "Verifying package signature..."
+  log_info "Verifying package signature..."
   if ! pkgutil --check-signature "${pkg_path}" 2>&1 | grep -q "Developer ID Installer: Microsoft Corporation"; then
-    log "Warning: Package does not appear to be signed by Microsoft Corporation"
-    log "Signature details:"
+    log_warn "Warning: Package does not appear to be signed by Microsoft Corporation"
+    log_warn "Signature details:"
     pkgutil --check-signature "${pkg_path}" 2>&1 || true
     return 1
   fi
 
-  log "Package signature verified: Microsoft Corporation"
+  log_success "Package signature verified: Microsoft Corporation"
   return 0
 }
 
@@ -527,18 +546,18 @@ uninstall_pwsh() {
   local removed_any=0
 
   if [[ -d "${target_root}" ]]; then
-    log "Uninstalling PowerShell from: ${target_root}"
+    log_info "Uninstalling PowerShell from: ${target_root}"
     run sudo rm -rf "${target_root}"
     removed_any=1
   else
-    log "No PowerShell install found at: ${target_root}"
+    log_warn "No PowerShell install found at: ${target_root}"
   fi
 
   if [[ -L "${pwsh_link}" ]]; then
     local link_target=""
     link_target="$(readlink "${pwsh_link}" 2>/dev/null || true)"
     if [[ "${link_target}" == *"microsoft/powershell/"* ]]; then
-      log "Removing symlink: ${pwsh_link}"
+      log_info "Removing symlink: ${pwsh_link}"
       run sudo rm -f "${pwsh_link}"
       removed_any=1
     fi
@@ -550,7 +569,7 @@ uninstall_pwsh() {
     if [[ -n "${pkg_ids}" ]]; then
       while IFS= read -r pkg; do
         [[ -z "${pkg}" ]] && continue
-        log "Forgetting package receipt: ${pkg}"
+        log_info "Forgetting package receipt: ${pkg}"
         run sudo pkgutil --forget "${pkg}"
       done <<<"${pkg_ids}"
     fi
@@ -565,9 +584,9 @@ uninstall_pwsh() {
   fi
 
   if [[ "${removed_any}" -eq 1 ]]; then
-    log "Uninstall complete."
+    log_success "Uninstall complete."
   else
-    log "Nothing to uninstall."
+    log_warn "Nothing to uninstall."
   fi
 
   # Check for user-specific directories that may need manual cleanup
@@ -578,11 +597,11 @@ uninstall_pwsh() {
 
   if [[ "${#user_dirs[@]}" -gt 0 ]]; then
     log ""
-    log "Note: The following user-specific directories still exist and may be removed manually:"
+    log_warn "Note: The following user-specific directories still exist and may be removed manually:"
     for dir in "${user_dirs[@]}"; do
-      log "  ${dir}"
+      log_warn "  ${dir}"
     done
-    log "To remove them, run: rm -rf ~/.config/powershell ~/.local/share/powershell ~/.cache/powershell"
+    log_warn "To remove them, run: rm -rf ~/.config/powershell ~/.local/share/powershell ~/.cache/powershell"
   fi
 }
 
@@ -626,7 +645,7 @@ while [[ $# -gt 0 ]]; do
     exit 0
     ;;
   *)
-    echo "Unknown argument: $1" >&2
+    log_error "Unknown argument: $1"
     usage
     exit 1
     ;;
@@ -635,7 +654,7 @@ done
 
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
   if [[ -n "${TAG}" || -n "${OUT_DIR}" || "${KEEP}" -eq 1 || "${FORCE}" -eq 1 || "${UNINSTALL}" -eq 1 || "${SKIP_CHECKSUM}" -eq 1 ]]; then
-    echo "ERROR: --check cannot be combined with install/uninstall options." >&2
+    log_error "ERROR: --check cannot be combined with install/uninstall options."
     exit 1
   fi
 fi
@@ -661,12 +680,12 @@ case "${ARCH}" in
 arm64) PKG_ARCH="arm64" ;;
 x86_64) PKG_ARCH="x64" ;;
 *)
-  echo "ERROR: Unsupported architecture: ${ARCH} (expected arm64 or x86_64)." >&2
+  log_error "ERROR: Unsupported architecture: ${ARCH} (expected arm64 or x86_64)."
   exit 1
   ;;
 esac
 
-log "Detected architecture: ${ARCH} -> selecting macOS ${PKG_ARCH} package"
+log_info "Detected architecture: ${ARCH} -> selecting macOS ${PKG_ARCH} package"
 
 PYTHON=""
 if command -v python3 >/dev/null 2>&1; then
@@ -674,7 +693,7 @@ if command -v python3 >/dev/null 2>&1; then
 elif command -v python >/dev/null 2>&1; then
   PYTHON="python"
 else
-  echo "ERROR: python3 (or python) is required to parse GitHub release JSON." >&2
+  log_error "ERROR: python3 (or python) is required to parse GitHub release JSON."
 
   # Suggest installation method
   if command -v brew >/dev/null 2>&1; then
