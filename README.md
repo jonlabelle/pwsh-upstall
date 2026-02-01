@@ -8,40 +8,102 @@ Platform-specific scripts to install/update PowerShell Core from GitHub releases
 - **Linux**: `upstall-pwsh-linux.sh` — x64/arm64, glibc/musl (Alpine)
 - **Windows**: `upstall-pwsh-windows.ps1` — x64/arm64
 
-## Usage
+## Table of contents
 
-### macOS & Linux
+- [Install](#install)
+  - [One-liners](#one-liners)
+  - [Other options](#other-options)
+- [Run locally](#run-locally)
+  - [macOS & Linux](#macos--linux)
+  - [Windows](#windows-1)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
 
-Downloads and installs PowerShell from GitHub releases with SHA256 verification. Auto-detects architecture and libc implementation.
+## Install
+
+### One-liners
+
+#### macOS
 
 ```bash
-# macOS one-liner install:
 curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-macos.sh | bash
+```
 
-# Linux one-liner install:
+#### Linux
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-linux.sh | sh
 ```
 
-```bash
-# Install/update latest
-./upstall-pwsh-macos.sh  # macOS
-./upstall-pwsh-linux.sh  # Linux
+#### Windows
 
-# Check if PowerShell is up to date
-./upstall-pwsh-macos.sh --check  # macOS
-./upstall-pwsh-linux.sh --check  # Linux
-
-# Specific version
-./upstall-pwsh-macos.sh --tag v7.5.4  # macOS
-./upstall-pwsh-linux.sh --tag v7.5.4  # Linux
-
-# Remove
-./upstall-pwsh-macos.sh --uninstall  # macOS
-./upstall-pwsh-linux.sh --uninstall  # Linux
+```powershell
+# Requires elevated privileges
+irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-windows.ps1' |
+    powershell -NoProfile -ExecutionPolicy Bypass -
 ```
 
-<details>
-<summary>Options</summary>
+> [!Note]
+> Run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`), to avoid process-in-use errors.
+
+---
+
+### Other options
+
+#### Clone the repo
+
+```bash
+git clone https://github.com/jonlabelle/pwsh-upstall.git
+cd pwsh-upstall
+```
+
+#### Download the archive (macOS/Linux)
+
+```bash
+curl -L -o pwsh-upstall.zip https://github.com/jonlabelle/pwsh-upstall/archive/refs/heads/main.zip
+unzip pwsh-upstall.zip
+cd pwsh-upstall-main
+```
+
+#### Download the archive (Windows)
+
+```powershell
+Invoke-WebRequest -Uri https://github.com/jonlabelle/pwsh-upstall/archive/refs/heads/main.zip -OutFile pwsh-upstall.zip
+Expand-Archive -Path pwsh-upstall.zip -DestinationPath .
+Set-Location .\pwsh-upstall-main
+```
+
+## Run locally
+
+### macOS & Linux
+
+> Replace `<platform>` with `macos` or `linux` accordingly.
+
+#### Install/update latest
+
+```bash
+./upstall-pwsh-<platform>.sh
+```
+
+#### Check if PowerShell is up to date
+
+```bash
+./upstall-pwsh-<platform>.sh --check
+```
+
+#### Specific version
+
+```bash
+./upstall-pwsh-<platform>.sh --tag v7.5.4
+```
+
+#### Remove
+
+```bash
+./upstall-pwsh-<platform>.sh --uninstall
+```
+
+#### macOS/Linux options
 
 | Option            | Description                                     |
 | ----------------- | ----------------------------------------------- |
@@ -55,43 +117,35 @@ curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/
 | `-n, --dry-run`   | Show what would happen without executing        |
 | `-h, --help`      | Display help message                            |
 
-**macOS**: The Homebrew `powershell` cask is [deprecated](https://formulae.brew.sh/cask/powershell).
-
-**Linux**: Detects x64/arm64 and glibc/musl. Installs to `/usr/local/microsoft/powershell/<version>` with symlink at `/usr/local/bin/pwsh`. Works with POSIX sh (including Alpine).
-
-</details>
-
 ---
 
 ### Windows
 
-Downloads and installs PowerShell from GitHub releases with SHA256 verification. Requires **elevated privileges**.
-
-> [!Important]
-> Run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`), to avoid process-in-use errors.
+#### Install/update latest
 
 ```powershell
-# Windows one-liner install:
-irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-windows.ps1' |
-    powershell -NoProfile -ExecutionPolicy Bypass -
+powershell -File .\upstall-pwsh-windows.ps1
 ```
 
+#### Check if PowerShell is up to date
+
 ```powershell
-# Install/update latest
-powershell -File .\upstall-pwsh-windows.ps1
-
-# Check if PowerShell is up to date
 powershell -File .\upstall-pwsh-windows.ps1 -Check
+```
 
-# Specific version
+#### Specific version
+
+```powershell
 powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
+```
 
-# Remove
+#### Remove
+
+```powershell
 powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
 ```
 
-<details>
-<summary>Options</summary>
+#### Windows options
 
 | Option           | Description                                      |
 | ---------------- | ------------------------------------------------ |
@@ -106,12 +160,7 @@ powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
 
 Detects x64/arm64. Requires elevated session. Installs to `Program Files\PowerShell\7`.
 
-</details>
-
----
-
-<details>
-<summary>Troubleshooting</summary>
+## Troubleshooting
 
 - **Checksum failed**: File corrupted or tampered. Retry or use `--skip-checksum`.
 
@@ -122,8 +171,6 @@ Detects x64/arm64. Requires elevated session. Installs to `Program Files\PowerSh
 - **Permission denied**: Run with sudo (Linux/macOS) or as Administrator (Windows).
 
 - **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead.
-
-</details>
 
 ## License
 
