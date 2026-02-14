@@ -16,8 +16,6 @@ Platform-specific scripts to install/update PowerShell Core from GitHub releases
   - [One-liners](#one-liners)
   - [Other options](#other-options)
 - [Run locally](#run-locally)
-  - [macOS & Linux](#macos--linux)
-  - [Windows](#windows-1)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
@@ -77,130 +75,71 @@ Set-Location .\pwsh-upstall-main
 
 ## Run locally
 
-### macOS & Linux
+Use the command for your platform:
 
-> Replace `<platform>` with `macos` or `linux` accordingly.
-
-#### Install/update latest
-
-The default behavior is to install/update to the latest stable release. To specify a different version, use the `--tag` option (see below).
-
-```bash
-./upstall-pwsh-<platform>.sh
-```
-
-#### Check if PowerShell is up to date
-
-Check if the installed PowerShell version is up to date without performing an installation:
-
-```bash
-./upstall-pwsh-<platform>.sh --check
-```
-
-#### Semver selector (major/minor/patch)
-
-Specify a semver selector to choose the desired release:
-
-```bash
-# Latest 7.x release (major track)
-./upstall-pwsh-<platform>.sh --tag v7
-
-# Latest 7.5.x release (minor track)
-./upstall-pwsh-<platform>.sh --tag v7.5
-
-# Specific patch release
-./upstall-pwsh-<platform>.sh --tag v7.5.4
-```
+| Platform | Command                                       |
+| -------- | --------------------------------------------- |
+| macOS    | `./upstall-pwsh-macos.sh`                     |
+| Linux    | `./upstall-pwsh-linux.sh`                     |
+| Windows  | `powershell -File .\upstall-pwsh-windows.ps1` |
 
 > [!Note]
-> Prereleases are supported only by explicit exact tag; default/latest/major/minor selection is stable-only.
+> On Windows, run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`).
 
-#### Uninstall
+### Common actions
+
+| Action                           | macOS                                 | Linux                                 | Windows                                                  |
+| -------------------------------- | ------------------------------------- | ------------------------------------- | -------------------------------------------------------- |
+| Install/update latest stable     | `./upstall-pwsh-macos.sh`             | `./upstall-pwsh-linux.sh`             | `powershell -File .\upstall-pwsh-windows.ps1`            |
+| Check if up to date (no install) | `./upstall-pwsh-macos.sh --check`     | `./upstall-pwsh-linux.sh --check`     | `powershell -File .\upstall-pwsh-windows.ps1 -Check`     |
+| Uninstall                        | `./upstall-pwsh-macos.sh --uninstall` | `./upstall-pwsh-linux.sh --uninstall` | `powershell -File .\upstall-pwsh-windows.ps1 -Uninstall` |
+
+### Select a version (`--tag` / `-Tag`)
+
+Use semver selectors to choose a release:
+
+```text
+v7      -> latest 7.x release
+v7.5    -> latest 7.5.x release
+v7.5.4  -> specific patch release
+```
+
+Examples:
 
 ```bash
-./upstall-pwsh-<platform>.sh --uninstall
+./upstall-pwsh-macos.sh --tag v7
+./upstall-pwsh-linux.sh --tag v7.5
 ```
 
-#### macOS/Linux options
-
-| Option            | Description                                                                                        |
-| ----------------- | -------------------------------------------------------------------------------------------------- |
-| `--tag <tag>`     | Semver selector: `v7` (latest 7.x), `v7.5` (latest 7.5.x), `v7.5.4` (specific patch), or exact tag |
-| `--out-dir <dir>` | Save downloaded package to specified directory                                                     |
-| `--keep`          | Keep the package file after installation                                                           |
-| `--force`         | Reinstall even if version already installed                                                        |
-| `--check`         | Only check if installed version is up to date                                                      |
-| `--uninstall`     | Remove PowerShell installation                                                                     |
-| `--skip-checksum` | Skip SHA256 verification (not recommended)                                                         |
-| `-n, --dry-run`   | Show what would happen without executing                                                           |
-| `-h, --help`      | Display help message                                                                               |
-
-> Prereleases require explicit exact tag, e.g. `--tag v7.6.0-preview.1`.
-
----
-
-### Windows
-
-#### Install/update latest
-
 ```powershell
-powershell -File .\upstall-pwsh-windows.ps1
-```
-
-#### Check if PowerShell is up to date
-
-```powershell
-powershell -File .\upstall-pwsh-windows.ps1 -Check
-```
-
-#### Semver selector (major/minor/patch)
-
-Specify a semver selector to choose the desired release:
-
-```powershell
-# Latest 7.x release (major track)
-powershell -File .\upstall-pwsh-windows.ps1 -Tag v7
-
-# Latest 7.5.x release (minor track)
-powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5
-
-# Specific patch release
 powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
 ```
 
-Prereleases are supported only by explicit exact tag; default/latest/major/minor selection is stable-only.
+> [!Note]
+> Prereleases require an explicit exact tag (for example, `v7.6.0-preview.1`). Default/latest/major/minor selection is stable-only.
 
-#### Uninstall
+### Option mapping
 
-```powershell
-powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
-```
+| Purpose                             | macOS/Linux       | Windows          |
+| ----------------------------------- | ----------------- | ---------------- |
+| Select version                      | `--tag <tag>`     | `-Tag <tag>`     |
+| Save downloaded package/installer   | `--out-dir <dir>` | `-OutDir <path>` |
+| Keep downloaded package/installer   | `--keep`          | `-Keep`          |
+| Reinstall even if already installed | `--force`         | `-Force`         |
+| Check only (no install)             | `--check`         | `-Check`         |
+| Uninstall                           | `--uninstall`     | `-Uninstall`     |
+| Skip SHA256 verification            | `--skip-checksum` | `-SkipChecksum`  |
+| Dry run                             | `-n, --dry-run`   | `-WhatIf`        |
+| Help                                | `-h, --help`      | N/A              |
 
-#### Windows options
-
-| Option           | Description                                                                                                                                |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `-Tag <tag>`     | Semver selector: `v7` (latest 7.x), `v7.5` (latest 7.5.x), `v7.5.4` (specific patch), or exact tag; prereleases require explicit exact tag |
-| `-OutDir <path>` | Save downloaded installer to specified directory                                                                                           |
-| `-Keep`          | Keep the .msi file after installation                                                                                                      |
-| `-Force`         | Reinstall even if version already installed                                                                                                |
-| `-Check`         | Only check if installed version is up to date                                                                                              |
-| `-Uninstall`     | Remove PowerShell installation                                                                                                             |
-| `-SkipChecksum`  | Skip SHA256 verification (not recommended)                                                                                                 |
-| `-WhatIf`        | Show what would happen without executing                                                                                                   |
-
-Detects x64/arm64. Requires elevated session. Installs to `Program Files\PowerShell\7`.
+> [!Note]
+> **Windows** automatically detects x64/arm64 architecture, requires Administrator privileges, and installs to `Program Files\PowerShell\7`.
 
 ## Troubleshooting
 
 - **Checksum failed**: File corrupted or tampered. Retry or use `--skip-checksum`.
-
-- **Network error**: Check internet connection and firewall settings.
-
 - **Insufficient disk space**: Requires 500MB minimum free space.
-
 - **Permission denied**: Run with sudo (Linux/macOS) or as Administrator (Windows).
-
 - **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead.
 
 ## License
