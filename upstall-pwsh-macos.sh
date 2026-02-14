@@ -21,7 +21,13 @@ set -euo pipefail
 #   ./upstall-pwsh-macos.sh [options]
 #
 #   Options:
-#     --tag <tag>        Install specific GitHub release tag (e.g., v7.5.4)
+#     --tag <tag>        Select release by semver/tag:
+#                        - v7      => latest 7.x.x (major track)
+#                        - v7.5    => latest 7.5.x (minor track)
+#                        - v7.5.4  => specific patch release
+#                        - other tags (e.g., preview) are resolved exactly
+#                        Prereleases are supported only via explicit exact tag;
+#                        default/latest/major/minor selection is stable-only.
 #     --out-dir <dir>    Save downloaded package to specified directory
 #     --keep             Retain package after installation
 #     --force            Reinstall even if target version already installed
@@ -35,7 +41,13 @@ set -euo pipefail
 #   # Install latest stable release
 #   ./upstall-pwsh-macos.sh
 #
-#   # Install specific version
+#   # Install latest 7.x release
+#   ./upstall-pwsh-macos.sh --tag v7
+#
+#   # Install latest 7.5.x release
+#   ./upstall-pwsh-macos.sh --tag v7.5
+#
+#   # Install specific patch version
 #   ./upstall-pwsh-macos.sh --tag v7.5.4
 #
 #   # Download to ~/Downloads and keep package
@@ -54,6 +66,8 @@ set -euo pipefail
 #   - Verifies Microsoft code signature and SHA256 checksums
 #   - Validates disk space before installation
 #   - Default behavior downloads latest stable release (not preview/RC)
+#   - Prereleases are supported only via explicit exact tag
+#     (default/latest/major/minor selection is stable-only)
 #
 # Author: Jon LaBelle
 # Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-macos.sh
@@ -102,8 +116,13 @@ Usage:
   upstall-pwsh-macos.sh [options]
 
 Options:
-  --tag <tag>        Install a specific GitHub release tag (e.g., v7.5.4).
-                     If omitted, installs the latest stable release.
+  --tag <tag>        Select release by semver/tag:
+                     - v7      => latest 7.x.x (major track)
+                     - v7.5    => latest 7.5.x (minor track)
+                     - v7.5.4  => specific patch release
+                     - other tags (e.g., preview) are resolved exactly
+                     If omitted (or set to 'latest'), installs the latest stable release.
+                     Prereleases are supported only via explicit exact tag.
   --out-dir <dir>    Directory to save the downloaded .pkg (default: temp dir).
   --keep             Keep the downloaded .pkg after installation (default: delete unless --out-dir is used).
   --force            Reinstall even if the target version is already installed.
@@ -117,7 +136,13 @@ Examples:
   # Install latest stable PowerShell
   ./upstall-pwsh-macos.sh
 
-  # Install a specific version
+  # Install latest release in major line 7.x
+  ./upstall-pwsh-macos.sh --tag v7
+
+  # Install latest release in minor line 7.5.x
+  ./upstall-pwsh-macos.sh --tag v7.5
+
+  # Install a specific patch version
   ./upstall-pwsh-macos.sh --tag v7.5.4
 
   # Download to ~/Downloads and keep the package
@@ -323,6 +348,154 @@ else:
 PY
 }
 
+github_api_get() {
+  local url="${1}"
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${GITHUB_TOKEN}" "${url}"
+  else
+    curl -fsSL --retry 3 --retry-delay 2 "${url}"
+  fi
+}
+
+is_numeric_semver_selector() {
+  local selector="${1}"
+  [[ "${selector}" =~ ^[vV]?[0-9]+(\.[0-9]+){0,2}$ ]]
+}
+
+semver_selector_part_count() {
+  local selector="${1#v}"
+  selector="${selector#V}"
+  awk -F'.' '{print NF}' <<<"${selector}"
+}
+
+get_release_metadata_by_semver_selector() {
+  local selector="${1}"
+  local target_pkg_suffix="${2}"
+  local selector_no_v="${selector#v}"
+  selector_no_v="${selector_no_v#V}"
+
+  log "Resolving semver selector: ${selector}" >&2
+
+  local json_file
+  json_file="$(mktemp)"
+  github_api_get "${API_BASE}/releases?per_page=100" >"${json_file}"
+
+  "${PYTHON}" - "${json_file}" "${target_pkg_suffix}" "${selector_no_v}" <<'PY'
+import json, re, sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+  releases = json.load(f)
+target_suffix = sys.argv[2]
+selector = (sys.argv[3] or "").strip()
+
+parts = selector.split(".")
+if not parts or len(parts) > 2 or any(not p.isdigit() for p in parts):
+  print("", "", "", "")
+  sys.exit(0)
+
+want = tuple(int(p) for p in parts)
+
+def parse_version_tag(tag):
+  m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)$", tag or "")
+  if not m:
+    return None
+  return tuple(int(g) for g in m.groups())
+
+def pick_asset(release):
+  assets = release.get("assets") or []
+  candidates = []
+  for asset in assets:
+    name = asset.get("name") or ""
+    url = asset.get("browser_download_url") or ""
+    if target_suffix in name and name.endswith(".pkg"):
+      candidates.append((name, url))
+
+  def score(item):
+    name, _ = item
+    s = 0
+    lname = name.lower()
+    if "preview" in lname:
+      s -= 10
+    if "rc" in lname:
+      s -= 5
+    if re.match(rf"^powershell-.*-{re.escape(target_suffix)}$", name):
+      s += 5
+    return s
+
+  candidates.sort(key=score, reverse=True)
+  if not candidates:
+    return None
+
+  name, url = candidates[0]
+  sha_name = name + ".sha256"
+  sha_url = ""
+  for asset in assets:
+    if (asset.get("name") or "") == sha_name:
+      sha_url = asset.get("browser_download_url") or ""
+      break
+
+  return url, name, sha_url
+
+matches = []
+for release in releases:
+  if release.get("draft") or release.get("prerelease"):
+    continue
+
+  tag = release.get("tag_name") or ""
+  version = parse_version_tag(tag)
+  if version is None:
+    continue
+
+  if len(want) == 1 and version[0] != want[0]:
+    continue
+  if len(want) == 2 and version[:2] != want:
+    continue
+
+  asset = pick_asset(release)
+  if not asset:
+    continue
+
+  url, name, sha_url = asset
+  matches.append((version, tag, url, name, sha_url))
+
+matches.sort(key=lambda x: x[0], reverse=True)
+if matches:
+  _, tag, url, name, sha_url = matches[0]
+  print(tag, url, name, sha_url)
+else:
+  print("", "", "", "")
+PY
+  rm -f "${json_file}"
+}
+
+resolve_release_metadata() {
+  local selector="${1:-}"
+  local target_pkg_suffix="${2}"
+  local selector_lc
+  selector_lc="$(tr '[:upper:]' '[:lower:]' <<<"${selector}")"
+
+  if [[ -z "${selector}" || "${selector_lc}" == "latest" ]]; then
+    get_release_metadata "${API_BASE}/releases/latest" "${target_pkg_suffix}"
+    return
+  fi
+
+  if is_numeric_semver_selector "${selector}"; then
+    local parts
+    parts="$(semver_selector_part_count "${selector}")"
+    if [[ "${parts}" -eq 1 || "${parts}" -eq 2 ]]; then
+      get_release_metadata_by_semver_selector "${selector}" "${target_pkg_suffix}"
+      return
+    fi
+
+    local normalized_tag="${selector#v}"
+    normalized_tag="${normalized_tag#V}"
+    get_release_metadata "${API_BASE}/releases/tags/v${normalized_tag}" "${target_pkg_suffix}"
+    return
+  fi
+
+  get_release_metadata "${API_BASE}/releases/tags/${selector}" "${target_pkg_suffix}"
+}
+
 download_and_verify_package() {
   local pkg_url="${1}"
   local pkg_path="${2}"
@@ -390,10 +563,9 @@ check_latest() {
   log_info "Checking network connectivity..."
   check_network
 
-  local release_url="${API_BASE}/releases/latest"
   local target_pkg_suffix="osx-${PKG_ARCH}.pkg"
   local rel_tag pkg_url pkg_name sha_url
-  read -r rel_tag pkg_url pkg_name sha_url < <(get_release_metadata "${release_url}" "${target_pkg_suffix}")
+  read -r rel_tag pkg_url pkg_name sha_url < <(resolve_release_metadata "" "${target_pkg_suffix}")
 
   if [[ -z "${pkg_url}" ]]; then
     log_error "ERROR: Could not find an ${target_pkg_suffix} asset in the latest release."
@@ -439,21 +611,17 @@ main_install() {
   log_info "Checking network connectivity..."
   check_network
 
-  # Decide which API endpoint to hit
-  local release_url
-  if [[ -n "${TAG}" ]]; then
-    release_url="${API_BASE}/releases/tags/${TAG}"
-  else
-    release_url="${API_BASE}/releases/latest"
-  fi
-
   local target_pkg_suffix="osx-${PKG_ARCH}.pkg"
   local rel_tag pkg_url pkg_name sha_url
-  read -r rel_tag pkg_url pkg_name sha_url < <(get_release_metadata "${release_url}" "${target_pkg_suffix}")
+  read -r rel_tag pkg_url pkg_name sha_url < <(resolve_release_metadata "${TAG}" "${target_pkg_suffix}")
 
   if [[ -z "${pkg_url}" ]]; then
-    log_error "ERROR: Could not find an ${target_pkg_suffix} asset in that release."
-    log_error "Tip: Try specifying --tag (e.g., --tag v7.5.4) or check the release assets in the browser."
+    if [[ -n "${TAG}" ]]; then
+      log_error "ERROR: Could not find an ${target_pkg_suffix} asset for selector '${TAG}'."
+      log_error "Tip: Try --tag v7, --tag v7.5, --tag v7.5.4, or a full release tag."
+    else
+      log_error "ERROR: Could not find an ${target_pkg_suffix} asset in the latest release."
+    fi
     exit 1
   fi
 

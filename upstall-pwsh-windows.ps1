@@ -12,7 +12,13 @@
         to avoid process-in-use errors when upgrading an existing PowerShell Core installation.
 
     .PARAMETER Tag
-        Install a specific GitHub release tag (e.g., v7.5.4). If omitted, installs the latest stable release.
+        Select release by semver/tag:
+        - v7      => latest 7.x.x (major track)
+        - v7.5    => latest 7.5.x (minor track)
+        - v7.5.4  => specific patch release
+        - other tags (e.g., preview) are resolved exactly
+        If omitted (or set to 'latest'), installs the latest stable release.
+        Prereleases are supported only via explicit exact tag.
 
     .PARAMETER OutDir
         Save the downloaded MSI installer to the specified directory. If omitted, uses a temporary directory.
@@ -40,8 +46,16 @@
         Install the latest stable PowerShell release.
 
     .EXAMPLE
+        powershell -File .\upstall-pwsh-windows.ps1 -Tag v7
+        Install the latest PowerShell release in major line 7.x.
+
+    .EXAMPLE
+        powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5
+        Install the latest PowerShell release in minor line 7.5.x.
+
+    .EXAMPLE
         powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
-        Install PowerShell version 7.5.4.
+        Install specific PowerShell patch release 7.5.4.
 
     .EXAMPLE
         powershell -File .\upstall-pwsh-windows.ps1 -Force
@@ -76,6 +90,8 @@
         - Uses semantic version comparison to detect upgrades
 
         Default behavior downloads the latest stable release (not preview/RC).
+        Prereleases are supported only via explicit exact tag
+        (default/latest/major/minor selection is stable-only).
 
         Author: Jon LaBelle
         Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-windows.ps1
@@ -241,14 +257,13 @@ function Get-PwshUninstallInfo
     return $null
 }
 
-function Get-Release
+function Invoke-GitHubApi
 {
-    param([string]$TagName)
-    $url = if ($TagName) { "$apiBase/releases/tags/$TagName" } else { "$apiBase/releases/latest" }
-    Write-Verbose "Fetching release metadata: $url"
+    param([Parameter(Mandatory = $true)][string]$Url)
 
+    Write-Verbose "Fetching release metadata: $Url"
     $params = @{
-        Uri = $url
+        Uri = $Url
         UseBasicParsing = $true
     }
 
@@ -259,6 +274,115 @@ function Get-Release
     }
 
     Invoke-RestMethod @params
+}
+
+function Get-SemVerSelectorParts
+{
+    param([string]$Selector)
+
+    if (-not $Selector)
+    {
+        return $null
+    }
+
+    $normalized = $Selector.Trim().TrimStart('v', 'V')
+    if ($normalized -notmatch '^\d+(\.\d+){0,2}$')
+    {
+        return $null
+    }
+
+    return @($normalized.Split('.'))
+}
+
+function Get-SemVerRelease
+{
+    param(
+        [string[]]$SelectorParts,
+        [string]$Arch
+    )
+
+    $suffix = "win-$Arch.msi"
+    $selectorText = $SelectorParts -join '.'
+    $releases = @(Invoke-GitHubApi -Url "$apiBase/releases?per_page=100")
+    $matching = @()
+
+    foreach ($release in $releases)
+    {
+        if ($release.draft -or $release.prerelease)
+        {
+            continue
+        }
+
+        $tag = [string]$release.tag_name
+        $tagMatch = [regex]::Match($tag, '^v?(\d+)\.(\d+)\.(\d+)$')
+        if (-not $tagMatch.Success)
+        {
+            continue
+        }
+
+        $major = [int]$tagMatch.Groups[1].Value
+        $minor = [int]$tagMatch.Groups[2].Value
+        $patch = [int]$tagMatch.Groups[3].Value
+
+        if ($SelectorParts.Count -eq 1)
+        {
+            if ($major -ne [int]$SelectorParts[0]) { continue }
+        }
+        elseif ($SelectorParts.Count -eq 2)
+        {
+            if ($major -ne [int]$SelectorParts[0] -or $minor -ne [int]$SelectorParts[1]) { continue }
+        }
+        else
+        {
+            continue
+        }
+
+        $hasAsset = @($release.assets | Where-Object { $_.browser_download_url -like "*$suffix" }).Count -gt 0
+        if (-not $hasAsset)
+        {
+            continue
+        }
+
+        $matching += [PSCustomObject]@{
+            Release = $release
+            Version = [Version]"$major.$minor.$patch"
+        }
+    }
+
+    if (-not $matching)
+    {
+        throw "Could not find a stable release matching selector [$selectorText] with a $suffix asset."
+    }
+
+    return ($matching | Sort-Object -Property Version -Descending | Select-Object -First 1).Release
+}
+
+function Get-Release
+{
+    param(
+        [string]$TagName,
+        [string]$Arch
+    )
+
+    if (-not $TagName -or $TagName -match '^(?i)latest$')
+    {
+        return Invoke-GitHubApi -Url "$apiBase/releases/latest"
+    }
+
+    $selectorParts = Get-SemVerSelectorParts -Selector $TagName
+    if ($selectorParts -and ($selectorParts.Count -eq 1 -or $selectorParts.Count -eq 2))
+    {
+        Write-Verbose "Resolving semver selector: $TagName"
+        return Get-SemVerRelease -SelectorParts $selectorParts -Arch $Arch
+    }
+
+    if ($selectorParts -and $selectorParts.Count -eq 3)
+    {
+        $normalizedTag = 'v' + ($selectorParts -join '.')
+        return Invoke-GitHubApi -Url "$apiBase/releases/tags/$normalizedTag"
+    }
+
+    return Invoke-GitHubApi -Url "$apiBase/releases/tags/$TagName"
 }
 
 function Select-Asset
@@ -321,7 +445,7 @@ if ($Check)
         exit 1
     }
 
-    $release = Get-Release -TagName $null
+    $release = Get-Release -TagName $null -Arch $arch
     $null = Select-Asset -Release $release -Arch $arch
 
     $releaseTag = $release.tag_name
@@ -437,7 +561,7 @@ if (-not (Test-NetworkConnectivity))
     exit 1
 }
 
-$release = Get-Release -TagName $Tag
+$release = Get-Release -TagName $Tag -Arch $arch
 $assetInfo = Select-Asset -Release $release -Arch $arch
 $asset = $assetInfo.Asset
 $shaAsset = $assetInfo.ShaAsset
