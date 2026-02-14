@@ -8,6 +8,8 @@ Platform-specific scripts to install/update PowerShell Core from GitHub releases
 - **Linux**: `upstall-pwsh-linux.sh` — x64/arm64, glibc/musl (Alpine)
 - **Windows**: `upstall-pwsh-windows.ps1` — x64/arm64
 
+![Checks if PowerShell is up to date](screenshot.png "Checks if PowerShell is up to date")
+
 ## Table of contents
 
 - [Install](#install)
