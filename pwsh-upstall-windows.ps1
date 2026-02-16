@@ -42,39 +42,39 @@
         Preview actions without making any changes to the system.
 
     .EXAMPLE
-        powershell -File .\upstall-pwsh-windows.ps1
+        powershell -File .\pwsh-upstall-windows.ps1
         Install the latest stable PowerShell release.
 
     .EXAMPLE
-        powershell -File .\upstall-pwsh-windows.ps1 -Tag v7
+        powershell -File .\pwsh-upstall-windows.ps1 -Tag v7
         Install the latest PowerShell release in major line 7.x.
 
     .EXAMPLE
-        powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5
+        powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.5
         Install the latest PowerShell release in minor line 7.5.x.
 
     .EXAMPLE
-        powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
+        powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.5.4
         Install specific PowerShell patch release 7.5.4.
 
     .EXAMPLE
-        powershell -File .\upstall-pwsh-windows.ps1 -Force
+        powershell -File .\pwsh-upstall-windows.ps1 -Force
         Reinstall the latest version even if already installed.
 
     .EXAMPLE
-        powershell -File .\upstall-pwsh-windows.ps1 -Check
+        powershell -File .\pwsh-upstall-windows.ps1 -Check
         Check if PowerShell is up to date.
 
     .EXAMPLE
-        powershell -File .\upstall-pwsh-windows.ps1 -Uninstall
+        powershell -File .\pwsh-upstall-windows.ps1 -Uninstall
         Uninstall PowerShell from the system.
 
     .EXAMPLE
-        powershell -File .\upstall-pwsh-windows.ps1 -WhatIf
+        powershell -File .\pwsh-upstall-windows.ps1 -WhatIf
         Preview what would happen without making any changes.
 
     .NOTES
-        Filename: upstall-pwsh-windows.ps1
+        Filename: pwsh-upstall-windows.ps1
 
         Requirements:
         - Windows PowerShell 5.1+ with Administrator privileges
@@ -94,13 +94,13 @@
         (default/latest/major/minor selection is stable-only).
 
         Author: Jon LaBelle
-        Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-windows.ps1
+        Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-windows.ps1
 
     .LINK
         https://github.com/PowerShell/PowerShell/releases
 
     .LINK
-        https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-windows.ps1
+        https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-windows.ps1
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -494,7 +494,7 @@ if (-not $Uninstall)
             Write-Warning 'You are running this script from PowerShell Core (pwsh.exe).'
             Write-Warning "The MSI installer may fail with 'process in use' errors when upgrading."
             Write-Warning 'For best results, run this script from Windows PowerShell (powershell.exe):'
-            Write-Warning '  powershell -File .\upstall-pwsh-windows.ps1'
+            Write-Warning '  powershell -File .\pwsh-upstall-windows.ps1'
             Write-Host ''
             Start-Sleep -Seconds 3
         }
@@ -578,7 +578,7 @@ $dlDir = if ($OutDir)
 }
 else
 {
-    Join-Path $env:TEMP ('upstall-pwsh-' + [guid]::NewGuid())
+    Join-Path $env:TEMP ('pwsh-upstall-' + [guid]::NewGuid())
 }
 
 if (-not $PSCmdlet.ShouldProcess($dlDir, 'Create download directory')) { return }

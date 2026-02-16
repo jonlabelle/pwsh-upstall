@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-# upstall-pwsh-linux.sh
+# pwsh-upstall-linux.sh
 #
 # DESCRIPTION:
 #   POSIX shell script to install, upgrade, or uninstall Microsoft PowerShell on Linux
@@ -17,7 +17,7 @@ set -eu
 #   - sha256sum (for checksum verification, can be skipped with --skip-checksum)
 #
 # USAGE:
-#   ./upstall-pwsh-linux.sh [options]
+#   ./pwsh-upstall-linux.sh [options]
 #
 #   Options:
 #     --tag <tag>        Select release by semver/tag:
@@ -38,25 +38,25 @@ set -eu
 #
 # EXAMPLES:
 #   # Install latest stable release
-#   ./upstall-pwsh-linux.sh
+#   ./pwsh-upstall-linux.sh
 #
 #   # Install latest 7.x release
-#   ./upstall-pwsh-linux.sh --tag v7
+#   ./pwsh-upstall-linux.sh --tag v7
 #
 #   # Install latest 7.5.x release
-#   ./upstall-pwsh-linux.sh --tag v7.5
+#   ./pwsh-upstall-linux.sh --tag v7.5
 #
 #   # Install specific patch version
-#   ./upstall-pwsh-linux.sh --tag v7.5.4
+#   ./pwsh-upstall-linux.sh --tag v7.5.4
 #
 #   # Preview installation without making changes
-#   ./upstall-pwsh-linux.sh --dry-run
+#   ./pwsh-upstall-linux.sh --dry-run
 #
 #   # Check if PowerShell is up to date
-#   ./upstall-pwsh-linux.sh --check
+#   ./pwsh-upstall-linux.sh --check
 #
 #   # Uninstall PowerShell
-#   ./upstall-pwsh-linux.sh --uninstall
+#   ./pwsh-upstall-linux.sh --uninstall
 #
 # NOTES:
 #   - Installs to /usr/local/microsoft/powershell/<version>
@@ -68,7 +68,7 @@ set -eu
 #     (default/latest/major/minor selection is stable-only)
 #
 # Author: Jon LaBelle
-# Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-linux.sh
+# Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-linux.sh
 
 REPO_OWNER="PowerShell"
 REPO_NAME="PowerShell"
@@ -111,7 +111,7 @@ trap cleanup_on_error EXIT INT TERM
 usage() {
   cat <<'USAGE'
 Usage:
-  upstall-pwsh-linux.sh [options]
+  pwsh-upstall-linux.sh [options]
 
 Options:
   --tag <tag>        Select release by semver/tag:
@@ -132,28 +132,28 @@ Options:
 
 Examples:
   # Install latest stable PowerShell
-  ./upstall-pwsh-linux.sh
+  ./pwsh-upstall-linux.sh
 
   # Install latest release in major line 7.x
-  ./upstall-pwsh-linux.sh --tag v7
+  ./pwsh-upstall-linux.sh --tag v7
 
   # Install latest release in minor line 7.5.x
-  ./upstall-pwsh-linux.sh --tag v7.5
+  ./pwsh-upstall-linux.sh --tag v7.5
 
   # Install a specific patch version
-  ./upstall-pwsh-linux.sh --tag v7.5.4
+  ./pwsh-upstall-linux.sh --tag v7.5.4
 
   # Preview actions only
-  ./upstall-pwsh-linux.sh --dry-run
+  ./pwsh-upstall-linux.sh --dry-run
 
   # Check if PowerShell is up to date
-  ./upstall-pwsh-linux.sh --check
+  ./pwsh-upstall-linux.sh --check
 
   # Reinstall even if already on the target version
-  ./upstall-pwsh-linux.sh --force
+  ./pwsh-upstall-linux.sh --force
 
   # Uninstall PowerShell
-  ./upstall-pwsh-linux.sh --uninstall
+  ./pwsh-upstall-linux.sh --uninstall
 USAGE
 }
 

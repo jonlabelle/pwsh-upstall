@@ -4,9 +4,9 @@
 
 Platform-specific scripts to install/update PowerShell Core from GitHub releases with SHA256 verification.
 
-- **macOS**: `upstall-pwsh-macos.sh` — Apple Silicon & Intel
-- **Linux**: `upstall-pwsh-linux.sh` — x64/arm64, glibc/musl (Alpine)
-- **Windows**: `upstall-pwsh-windows.ps1` — x64/arm64
+- **macOS**: `pwsh-upstall-macos.sh` — Apple Silicon & Intel
+- **Linux**: `pwsh-upstall-linux.sh` — x64/arm64, glibc/musl (Alpine)
+- **Windows**: `pwsh-upstall-windows.ps1` — x64/arm64
 
 ![Checks if PowerShell is up to date](screenshot.png "Checks if PowerShell is up to date")
 
@@ -26,20 +26,20 @@ Platform-specific scripts to install/update PowerShell Core from GitHub releases
 #### macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-macos.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-macos.sh | bash
 ```
 
 #### Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-linux.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-linux.sh | sh
 ```
 
 #### Windows
 
 ```powershell
 # Requires elevated privileges
-irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/upstall-pwsh-windows.ps1' |
+irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-windows.ps1' |
     powershell -NoProfile -ExecutionPolicy Bypass -
 ```
 
@@ -79,9 +79,9 @@ Use the command for your platform:
 
 | Platform | Command                                       |
 | -------- | --------------------------------------------- |
-| macOS    | `./upstall-pwsh-macos.sh`                     |
-| Linux    | `./upstall-pwsh-linux.sh`                     |
-| Windows  | `powershell -File .\upstall-pwsh-windows.ps1` |
+| macOS    | `./pwsh-upstall-macos.sh`                     |
+| Linux    | `./pwsh-upstall-linux.sh`                     |
+| Windows  | `powershell -File .\pwsh-upstall-windows.ps1` |
 
 > [!Note]
 > On Windows, run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`).
@@ -90,9 +90,9 @@ Use the command for your platform:
 
 | Action                           | macOS                                 | Linux                                 | Windows                                                  |
 | -------------------------------- | ------------------------------------- | ------------------------------------- | -------------------------------------------------------- |
-| Install/update latest stable     | `./upstall-pwsh-macos.sh`             | `./upstall-pwsh-linux.sh`             | `powershell -File .\upstall-pwsh-windows.ps1`            |
-| Check if up to date (no install) | `./upstall-pwsh-macos.sh --check`     | `./upstall-pwsh-linux.sh --check`     | `powershell -File .\upstall-pwsh-windows.ps1 -Check`     |
-| Uninstall                        | `./upstall-pwsh-macos.sh --uninstall` | `./upstall-pwsh-linux.sh --uninstall` | `powershell -File .\upstall-pwsh-windows.ps1 -Uninstall` |
+| Install/update latest stable     | `./pwsh-upstall-macos.sh`             | `./pwsh-upstall-linux.sh`             | `powershell -File .\pwsh-upstall-windows.ps1`            |
+| Check if up to date (no install) | `./pwsh-upstall-macos.sh --check`     | `./pwsh-upstall-linux.sh --check`     | `powershell -File .\pwsh-upstall-windows.ps1 -Check`     |
+| Uninstall                        | `./pwsh-upstall-macos.sh --uninstall` | `./pwsh-upstall-linux.sh --uninstall` | `powershell -File .\pwsh-upstall-windows.ps1 -Uninstall` |
 
 ### Select a version (`--tag` / `-Tag`)
 
@@ -107,12 +107,12 @@ v7.5.4  -> specific patch release
 Examples:
 
 ```bash
-./upstall-pwsh-macos.sh --tag v7
-./upstall-pwsh-linux.sh --tag v7.5
+./pwsh-upstall-macos.sh --tag v7
+./pwsh-upstall-linux.sh --tag v7.5
 ```
 
 ```powershell
-powershell -File .\upstall-pwsh-windows.ps1 -Tag v7.5.4
+powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.5.4
 ```
 
 > [!Note]

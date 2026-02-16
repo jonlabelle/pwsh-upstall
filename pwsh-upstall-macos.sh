@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# upstall-pwsh-macos.sh
+# pwsh-upstall-macos.sh
 #
 # DESCRIPTION:
 #   Bash script to install, upgrade, or uninstall Microsoft PowerShell on macOS
@@ -18,7 +18,7 @@ set -euo pipefail
 #   - shasum (for checksum verification, can be skipped with --skip-checksum)
 #
 # USAGE:
-#   ./upstall-pwsh-macos.sh [options]
+#   ./pwsh-upstall-macos.sh [options]
 #
 #   Options:
 #     --tag <tag>        Select release by semver/tag:
@@ -39,25 +39,25 @@ set -euo pipefail
 #
 # EXAMPLES:
 #   # Install latest stable release
-#   ./upstall-pwsh-macos.sh
+#   ./pwsh-upstall-macos.sh
 #
 #   # Install latest 7.x release
-#   ./upstall-pwsh-macos.sh --tag v7
+#   ./pwsh-upstall-macos.sh --tag v7
 #
 #   # Install latest 7.5.x release
-#   ./upstall-pwsh-macos.sh --tag v7.5
+#   ./pwsh-upstall-macos.sh --tag v7.5
 #
 #   # Install specific patch version
-#   ./upstall-pwsh-macos.sh --tag v7.5.4
+#   ./pwsh-upstall-macos.sh --tag v7.5.4
 #
 #   # Download to ~/Downloads and keep package
-#   ./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep
+#   ./pwsh-upstall-macos.sh --out-dir "$HOME/Downloads" --keep
 #
 #   # Check if PowerShell is up to date
-#   ./upstall-pwsh-macos.sh --check
+#   ./pwsh-upstall-macos.sh --check
 #
 #   # Uninstall PowerShell
-#   ./upstall-pwsh-macos.sh --uninstall
+#   ./pwsh-upstall-macos.sh --uninstall
 #
 # NOTES:
 #   - Installs to /usr/local/microsoft/powershell/<version>
@@ -70,7 +70,7 @@ set -euo pipefail
 #     (default/latest/major/minor selection is stable-only)
 #
 # Author: Jon LaBelle
-# Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/upstall-pwsh-macos.sh
+# Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-macos.sh
 
 REPO_OWNER="PowerShell"
 REPO_NAME="PowerShell"
@@ -113,7 +113,7 @@ trap cleanup_on_error EXIT INT TERM
 usage() {
   cat <<'USAGE'
 Usage:
-  upstall-pwsh-macos.sh [options]
+  pwsh-upstall-macos.sh [options]
 
 Options:
   --tag <tag>        Select release by semver/tag:
@@ -134,31 +134,31 @@ Options:
 
 Examples:
   # Install latest stable PowerShell
-  ./upstall-pwsh-macos.sh
+  ./pwsh-upstall-macos.sh
 
   # Install latest release in major line 7.x
-  ./upstall-pwsh-macos.sh --tag v7
+  ./pwsh-upstall-macos.sh --tag v7
 
   # Install latest release in minor line 7.5.x
-  ./upstall-pwsh-macos.sh --tag v7.5
+  ./pwsh-upstall-macos.sh --tag v7.5
 
   # Install a specific patch version
-  ./upstall-pwsh-macos.sh --tag v7.5.4
+  ./pwsh-upstall-macos.sh --tag v7.5.4
 
   # Download to ~/Downloads and keep the package
-  ./upstall-pwsh-macos.sh --out-dir "$HOME/Downloads" --keep
+  ./pwsh-upstall-macos.sh --out-dir "$HOME/Downloads" --keep
 
   # Preview actions only
-  ./upstall-pwsh-macos.sh --dry-run
+  ./pwsh-upstall-macos.sh --dry-run
 
   # Check if PowerShell is up to date
-  ./upstall-pwsh-macos.sh --check
+  ./pwsh-upstall-macos.sh --check
 
   # Reinstall even if already on the target version
-  ./upstall-pwsh-macos.sh --force
+  ./pwsh-upstall-macos.sh --force
 
   # Uninstall PowerShell
-  ./upstall-pwsh-macos.sh --uninstall
+  ./pwsh-upstall-macos.sh --uninstall
 USAGE
 }
 
