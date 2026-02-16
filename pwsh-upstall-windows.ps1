@@ -13,18 +13,22 @@
 
     .PARAMETER Tag
         Select release by semver/tag:
+
         - v7      => latest 7.x.x (major track)
         - v7.5    => latest 7.5.x (minor track)
         - v7.5.4  => specific patch release
         - other tags (e.g., preview) are resolved exactly
+
         If omitted (or set to 'latest'), installs the latest stable release.
         Prereleases are supported only via explicit exact tag.
 
     .PARAMETER OutDir
-        Save the downloaded MSI installer to the specified directory. If omitted, uses a temporary directory.
+        Save the downloaded MSI installer to the specified directory.
+        If omitted, uses a temporary directory.
 
     .PARAMETER Keep
-        Retain the MSI installer after installation. By default, the installer is deleted unless -OutDir is specified.
+        Retain the MSI installer after installation.
+        By default, the installer is deleted unless -OutDir is specified.
 
     .PARAMETER Force
         Reinstall even if the target version is already installed.
@@ -43,45 +47,55 @@
 
     .EXAMPLE
         powershell -File .\pwsh-upstall-windows.ps1
+
         Install the latest stable PowerShell release.
 
     .EXAMPLE
         powershell -File .\pwsh-upstall-windows.ps1 -Tag v7
+
         Install the latest PowerShell release in major line 7.x.
 
     .EXAMPLE
         powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.5
+
         Install the latest PowerShell release in minor line 7.5.x.
 
     .EXAMPLE
         powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.5.4
+
         Install specific PowerShell patch release 7.5.4.
 
     .EXAMPLE
         powershell -File .\pwsh-upstall-windows.ps1 -Force
+
         Reinstall the latest version even if already installed.
 
     .EXAMPLE
         powershell -File .\pwsh-upstall-windows.ps1 -Check
+
         Check if PowerShell is up to date.
 
     .EXAMPLE
         powershell -File .\pwsh-upstall-windows.ps1 -Uninstall
+
         Uninstall PowerShell from the system.
 
     .EXAMPLE
         powershell -File .\pwsh-upstall-windows.ps1 -WhatIf
+
         Preview what would happen without making any changes.
 
     .NOTES
         Filename: pwsh-upstall-windows.ps1
 
         Requirements:
+
         - Windows PowerShell 5.1+ with Administrator privileges
         - Internet connectivity to GitHub API
         - Sufficient disk space (~500MB recommended)
 
         The script automatically:
+
         - Detects system architecture (x64 or ARM64)
         - Downloads MSI installer from GitHub Releases
         - Verifies SHA256 checksums
@@ -116,9 +130,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-$repoOwner = 'PowerShell'
-$repoName = 'PowerShell'
-$apiBase = "https://api.github.com/repos/$repoOwner/$repoName"
+$apiBase = 'https://api.github.com/repos/PowerShell/PowerShell'
 
 function Write-Info
 {

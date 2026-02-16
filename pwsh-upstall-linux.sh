@@ -70,9 +70,7 @@ set -eu
 # Author: Jon LaBelle
 # Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-linux.sh
 
-REPO_OWNER="PowerShell"
-REPO_NAME="PowerShell"
-API_BASE="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
+API_BASE="https://api.github.com/repos/PowerShell/PowerShell"
 
 DRY_RUN=0
 TAG=""     # e.g., v7.5.4
@@ -162,6 +160,7 @@ log_info() { printf '%s\n' "${C_CYAN}$*${C_RESET}"; }
 log_warn() { printf '%s\n' "${C_YELLOW}$*${C_RESET}"; }
 log_success() { printf '%s\n' "${C_GREEN}$*${C_RESET}"; }
 log_error() { printf '%s\n' "${C_RED}$*${C_RESET}" >&2; }
+
 run() {
   if [ "${DRY_RUN}" -eq 1 ]; then
     log "[dry-run] $*"

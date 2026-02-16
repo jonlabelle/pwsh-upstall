@@ -72,9 +72,7 @@ set -euo pipefail
 # Author: Jon LaBelle
 # Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-macos.sh
 
-REPO_OWNER="PowerShell"
-REPO_NAME="PowerShell"
-API_BASE="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
+API_BASE="https://api.github.com/repos/PowerShell/PowerShell"
 
 DRY_RUN=0
 TAG="" # e.g., v7.5.4
