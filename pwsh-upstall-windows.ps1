@@ -584,17 +584,6 @@ Write-Info "Selected PowerShell release: $releaseTag"
 Write-Info "Selected installer: $($asset.name)"
 Write-Info "Download URL: $($asset.browser_download_url)"
 
-$dlDir = if ($OutDir)
-{
-    $OutDir
-}
-else
-{
-    Join-Path $env:TEMP ('pwsh-upstall-' + [guid]::NewGuid())
-}
-
-if (-not $PSCmdlet.ShouldProcess($dlDir, 'Create download directory')) { return }
-
 if (-not $Force)
 {
     $installed = Get-InstalledPwshVersion
@@ -609,10 +598,43 @@ if (-not $Force)
     }
 }
 
+$dlDir = if ($OutDir)
+{
+    $OutDir
+}
+else
+{
+    Join-Path $env:TEMP ('pwsh-upstall-' + [guid]::NewGuid())
+}
+
+if ($WhatIfPreference)
+{
+    Write-Info 'Dry-run summary:'
+    Write-Host "  Would create  : $dlDir"
+    Write-Host "  Would download: $($asset.browser_download_url)"
+    Write-Host "  Would install : $($asset.name)"
+    if ($SkipChecksum)
+    {
+        Write-Host '  Would verify  : skip SHA256 checksum verification'
+    }
+    else
+    {
+        Write-Host '  Would verify  : SHA256 checksum'
+    }
+    Write-Host '  Would run     : msiexec.exe /i <downloaded-msi> /qn /norestart'
+    return
+}
+
 if (-not (Test-DiskSpace -Path $env:ProgramFiles -RequiredMB 500))
 {
     exit 1
 }
+
+if (-not $PSCmdlet.ShouldProcess($dlDir, 'Create download directory'))
+{
+    return
+}
+
 New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
 
 try

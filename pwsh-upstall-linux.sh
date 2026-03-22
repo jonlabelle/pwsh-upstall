@@ -581,8 +581,10 @@ check_latest() {
     exit 2
   fi
 
-  compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"
-  _cmp=$?
+  _cmp=0
+  if ! compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"; then
+    _cmp=$?
+  fi
   if [ "${_cmp}" -eq 0 ]; then
     log_success "PowerShell ${INSTALLED_VERSION} is up to date (latest: ${DESIRED_VERSION})."
     exit 0
@@ -639,8 +641,12 @@ main_install() {
   if [ "${FORCE}" -eq 0 ] && [ -n "${REL_TAG}" ] && [ -n "${INSTALLED_VERSION}" ]; then
     DESIRED_VERSION="${REL_TAG#v}"
     if [ -n "${DESIRED_VERSION}" ]; then
-      compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"
-      _cmp=$?
+      _cmp=0
+      if compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"; then
+        _cmp=0
+      else
+        :
+      fi
       if [ "${_cmp}" -eq 0 ]; then
         log_warn "PowerShell ${INSTALLED_VERSION} is already installed; use --force to reinstall."
         exit 0

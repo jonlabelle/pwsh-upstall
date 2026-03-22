@@ -591,8 +591,12 @@ check_latest() {
     exit 2
   fi
 
-  compare_versions "${installed_version}" "${desired_version}"
-  local version_cmp=$?
+  local version_cmp=0
+  if compare_versions "${installed_version}" "${desired_version}"; then
+    :
+  else
+    version_cmp=$?
+  fi
   if [[ ${version_cmp} -eq 0 ]]; then
     log_success "PowerShell ${installed_version} is up to date (latest: ${desired_version})."
     exit 0
@@ -647,8 +651,12 @@ main_install() {
     if [[ -n "${rel_tag}" && -n "${installed_version}" ]]; then
       local desired_version="${rel_tag#v}"
       if [[ -n "${desired_version}" ]]; then
-        compare_versions "${installed_version}" "${desired_version}"
-        local version_cmp=$?
+        local version_cmp=0
+        if compare_versions "${installed_version}" "${desired_version}"; then
+          :
+        else
+          version_cmp=$?
+        fi
         if [[ ${version_cmp} -eq 0 ]]; then
           log_warn "PowerShell ${installed_version} is already installed; skipping install. Use --force to reinstall."
           trap - EXIT INT TERM
