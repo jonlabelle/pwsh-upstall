@@ -136,6 +136,20 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $apiBase = 'https://api.github.com/repos/PowerShell/PowerShell'
+$script:InvokeRestMethodSupportsBasicParsing = $false
+$script:InvokeWebRequestSupportsBasicParsing = $false
+
+try
+{
+    $script:InvokeRestMethodSupportsBasicParsing = (Get-Command -Name Invoke-RestMethod -ErrorAction Stop).Parameters.ContainsKey('UseBasicParsing')
+}
+catch { }
+
+try
+{
+    $script:InvokeWebRequestSupportsBasicParsing = (Get-Command -Name Invoke-WebRequest -ErrorAction Stop).Parameters.ContainsKey('UseBasicParsing')
+}
+catch { }
 
 function Write-Info
 {
@@ -155,6 +169,81 @@ function Write-Success
     Write-Host $Message -ForegroundColor Green
 }
 
+function Enable-Tls12
+{
+    try
+    {
+        $tls12 = [System.Net.SecurityProtocolType]::Tls12
+        $currentProtocols = [System.Net.ServicePointManager]::SecurityProtocol
+
+        if (($currentProtocols -band $tls12) -ne $tls12)
+        {
+            [System.Net.ServicePointManager]::SecurityProtocol = $currentProtocols -bor $tls12
+        }
+    }
+    catch
+    {
+        Write-Verbose "Could not enable TLS 1.2 for web requests: $_"
+    }
+}
+
+function Invoke-CompatRestMethod
+{
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Parameters
+    )
+
+    if ($script:InvokeRestMethodSupportsBasicParsing)
+    {
+        $Parameters['UseBasicParsing'] = $true
+    }
+
+    Invoke-RestMethod @Parameters
+}
+
+function Invoke-CompatWebRequest
+{
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Parameters
+    )
+
+    if ($script:InvokeWebRequestSupportsBasicParsing)
+    {
+        $Parameters['UseBasicParsing'] = $true
+    }
+
+    Invoke-WebRequest @Parameters
+}
+
+function Remove-VersionPrefix
+{
+    param([string]$Value)
+
+    if ($null -eq $Value)
+    {
+        return $null
+    }
+
+    return ($Value -replace '^[vV]', '')
+}
+
+function Get-RegistryViews
+{
+    if ([Environment]::Is64BitOperatingSystem)
+    {
+        return @(
+            [Microsoft.Win32.RegistryView]::Registry64,
+            [Microsoft.Win32.RegistryView]::Registry32
+        )
+    }
+
+    return @([Microsoft.Win32.RegistryView]::Default)
+}
+
+Enable-Tls12
+
 if ($Check -and ($Tag -or $OutDir -or $Keep -or $Force -or $KeepOldVersion -or $Uninstall -or $SkipChecksum))
 {
     Write-Error 'The -Check option cannot be combined with install/uninstall options.'
@@ -171,12 +260,16 @@ function Test-NetworkConnectivity
 
     try
     {
-        $null = Invoke-RestMethod -Uri 'https://api.github.com' -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
+        $null = Invoke-CompatRestMethod -Parameters @{
+            Uri = 'https://api.github.com'
+            TimeoutSec = 10
+            ErrorAction = 'Stop'
+        }
         return $true
     }
     catch
     {
-        Write-Error 'Cannot reach GitHub API. Check your internet connection.'
+        Write-Error -Message 'Cannot reach GitHub API. Check your internet connection.' -ErrorAction Continue
         return $false
     }
 }
@@ -191,14 +284,15 @@ function Test-DiskSpace
     try
     {
         $drive = [System.IO.Path]::GetPathRoot($Path)
-        $driveInfo = Get-PSDrive -Name $drive.TrimEnd(':\') -ErrorAction Stop
+        $driveName = $drive -replace '[:\\]+$', ''
+        $driveInfo = Get-PSDrive -Name $driveName -ErrorAction Stop
         $availableMB = [math]::Round($driveInfo.Free / 1MB)
 
         Write-Verbose "Disk space check: ${availableMB}MB available on $drive"
 
         if ($availableMB -lt $RequiredMB)
         {
-            Write-Error "Insufficient disk space. Required: ${RequiredMB}MB, Available: ${availableMB}MB"
+            Write-Error -Message "Insufficient disk space. Required: ${RequiredMB}MB, Available: ${availableMB}MB" -ErrorAction Continue
             return $false
         }
         return $true
@@ -219,8 +313,8 @@ function Compare-SemanticVersion
 
     try
     {
-        $v1 = [version]($Version1 -replace '^v', '')
-        $v2 = [version]($Version2 -replace '^v', '')
+        $v1 = [version](Remove-VersionPrefix -Value $Version1)
+        $v2 = [version](Remove-VersionPrefix -Value $Version2)
 
         if ($v1 -eq $v2) { return 0 }
         if ($v1 -lt $v2) { return -1 }
@@ -235,42 +329,90 @@ function Compare-SemanticVersion
 
 function Get-OsArch
 {
-    $arch = $env:PROCESSOR_ARCHITECTURE
-    switch ($arch)
+    $arch = $env:PROCESSOR_ARCHITEW6432
+    if (-not $arch)
     {
-        'AMD64' { return 'x64' }
-        'x86_64' { return 'x64' }
-        'ARM64' { return 'arm64' }
+        $arch = $env:PROCESSOR_ARCHITECTURE
+    }
+
+    switch -Regex ($arch.ToUpperInvariant())
+    {
+        '^(AMD64|X86_64)$' { return 'x64' }
+        '^ARM64$' { return 'arm64' }
+        '^X86$' { throw '32-bit x86 Windows is not supported by PowerShell MSI releases.' }
         default { throw "Unsupported architecture: $arch" }
     }
 }
 
 function Get-PwshUninstallInfo
 {
-    $roots = @(
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
-    )
+    $uninstallSubKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
 
-    foreach ($root in $roots)
+    foreach ($view in Get-RegistryViews)
     {
-        if (-not (Test-Path $root)) { continue }
-        foreach ($item in Get-ChildItem $root)
+        $baseKey = $null
+        $uninstallKey = $null
+
+        try
         {
-            $p = Get-ItemProperty $item.PSPath -ErrorAction SilentlyContinue
-            if ($null -eq $p) { continue }
-            if (($p.DisplayName -match '^PowerShell 7') -or ($p.DisplayName -match '^PowerShell\b' -and $p.DisplayName -match 'x64|arm64|7'))
+            $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $view)
+            $uninstallKey = $baseKey.OpenSubKey($uninstallSubKey)
+            if ($null -eq $uninstallKey) { continue }
+
+            foreach ($subKeyName in $uninstallKey.GetSubKeyNames())
             {
-                if ($p.UninstallString)
+                $itemKey = $null
+
+                try
                 {
-                    return [PSCustomObject]@{
-                        DisplayName = $p.DisplayName
-                        UninstallString = $p.UninstallString
+                    $itemKey = $uninstallKey.OpenSubKey($subKeyName)
+                    if ($null -eq $itemKey) { continue }
+
+                    $displayName = $itemKey.GetValue('DisplayName')
+                    $uninstallString = $itemKey.GetValue('UninstallString')
+                    $isSupportedPwshInstall = $displayName -and $displayName -notmatch 'x86' -and (
+                        $displayName -match '^PowerShell 7' -or
+                        ($displayName -match '^PowerShell\b' -and $displayName -match 'x64|arm64|7')
+                    )
+
+                    if ($isSupportedPwshInstall)
+                    {
+                        if ($uninstallString)
+                        {
+                            return [PSCustomObject]@{
+                                DisplayName = $displayName
+                                UninstallString = $uninstallString
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    if ($itemKey)
+                    {
+                        $itemKey.Close()
                     }
                 }
             }
         }
+        catch
+        {
+            Write-Verbose "Failed to inspect uninstall registry view [$view]: $_"
+        }
+        finally
+        {
+            if ($uninstallKey)
+            {
+                $uninstallKey.Close()
+            }
+
+            if ($baseKey)
+            {
+                $baseKey.Close()
+            }
+        }
     }
+
     return $null
 }
 
@@ -279,18 +421,22 @@ function Invoke-GitHubApi
     param([Parameter(Mandatory = $true)][string]$Url)
 
     Write-Verbose "Fetching release metadata: $Url"
-    $params = @{
-        Uri = $Url
-        UseBasicParsing = $true
+    $headers = @{
+        'User-Agent' = 'pwsh-upstall'
     }
 
     # Use GitHub token if available (avoids rate limiting in CI environments)
     if ($env:GITHUB_TOKEN)
     {
-        $params['Headers'] = @{ Authorization = "Bearer $env:GITHUB_TOKEN" }
+        $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN"
     }
 
-    Invoke-RestMethod @params
+    $params = @{
+        Uri = $Url
+        Headers = $headers
+    }
+
+    Invoke-CompatRestMethod -Parameters $params
 }
 
 function Get-SemVerSelectorParts
@@ -302,7 +448,7 @@ function Get-SemVerSelectorParts
         return $null
     }
 
-    $normalized = $Selector.Trim().TrimStart('v', 'V')
+    $normalized = Remove-VersionPrefix -Value $Selector.Trim()
     if ($normalized -notmatch '^\d+(\.\d+){0,2}$')
     {
         return $null
@@ -454,9 +600,9 @@ function Get-InstalledPwshVersion
 function Show-RemainingPwshUserDirs
 {
     $userDirs = @()
-    $docsPath = Join-Path $env:USERPROFILE 'Documents\PowerShell'
-    $localPath = Join-Path $env:LOCALAPPDATA 'Microsoft\PowerShell'
-    $roamingPath = Join-Path $env:APPDATA 'Microsoft\PowerShell'
+    $docsPath = Join-Path -Path $env:USERPROFILE -ChildPath 'Documents\PowerShell'
+    $localPath = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Microsoft\PowerShell'
+    $roamingPath = Join-Path -Path $env:APPDATA -ChildPath 'Microsoft\PowerShell'
 
     if (Test-Path $docsPath) { $userDirs += $docsPath }
     if (Test-Path $localPath) { $userDirs += $localPath }
@@ -522,7 +668,7 @@ if ($Check)
     $null = Select-Asset -Release $release -Arch $arch
 
     $releaseTag = $release.tag_name
-    $latestVersion = $releaseTag.TrimStart('v')
+    $latestVersion = Remove-VersionPrefix -Value $releaseTag
 
     if (-not $latestVersion)
     {
@@ -609,7 +755,7 @@ $assetInfo = Select-Asset -Release $release -Arch $arch
 $asset = $assetInfo.Asset
 $shaAsset = $assetInfo.ShaAsset
 $releaseTag = $release.tag_name
-$targetVersion = $releaseTag.TrimStart('v')
+$targetVersion = Remove-VersionPrefix -Value $releaseTag
 
 Write-Info "Selected PowerShell release: $releaseTag"
 Write-Info "Selected installer: $($asset.name)"
@@ -648,7 +794,7 @@ $dlDir = if ($OutDir)
 }
 else
 {
-    Join-Path $env:TEMP ('pwsh-upstall-' + [guid]::NewGuid())
+    Join-Path -Path $env:TEMP -ChildPath ('pwsh-upstall-' + [guid]::NewGuid())
 }
 
 if ($WhatIfPreference)
@@ -718,7 +864,7 @@ try
         }
     }
 
-    $installerPath = Join-Path $dlDir $asset.name
+    $installerPath = Join-Path -Path $dlDir -ChildPath $asset.name
 
     if (Test-Path $installerPath)
     {
@@ -728,7 +874,10 @@ try
 
     if ($PSCmdlet.ShouldProcess($installerPath, 'Download installer'))
     {
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installerPath
+        Invoke-CompatWebRequest -Parameters @{
+            Uri = $asset.browser_download_url
+            OutFile = $installerPath
+        }
     }
 
     # Verify SHA256 checksum
@@ -738,7 +887,10 @@ try
         Write-Info 'Downloading checksum file...'
         if ($PSCmdlet.ShouldProcess($shaPath, 'Download SHA256 checksum'))
         {
-            Invoke-WebRequest -Uri $shaAsset.browser_download_url -OutFile $shaPath
+            Invoke-CompatWebRequest -Parameters @{
+                Uri = $shaAsset.browser_download_url
+                OutFile = $shaPath
+            }
         }
 
         Write-Info 'Verifying SHA256 checksum...'
