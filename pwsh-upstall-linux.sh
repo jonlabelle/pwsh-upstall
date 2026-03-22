@@ -174,6 +174,26 @@ run() {
   fi
 }
 
+run_root() {
+  if [ -n "${SUDO}" ]; then
+    run "${SUDO}" "$@"
+  else
+    run "$@"
+  fi
+}
+
+parse_release_metadata() {
+  _rel_data="${1}"
+  REL_TAG=""
+  PKG_URL=""
+  PKG_NAME=""
+  SHA_URL=""
+
+  IFS=' ' read -r REL_TAG PKG_URL PKG_NAME SHA_URL <<EOF
+${_rel_data}
+EOF
+}
+
 need_cmd() {
   if ! command -v "${1}" >/dev/null 2>&1; then
     log_error "ERROR: missing required command: ${1}"
@@ -524,6 +544,8 @@ resolve_release_metadata() {
     return
   fi
 
+  # Predicate helper intentionally returns non-zero for non-semver selectors.
+  # shellcheck disable=SC2310
   if is_numeric_semver_selector "${_selector}"; then
     _parts="$(semver_selector_part_count "${_selector}")"
     if [ "${_parts}" -eq 1 ] || [ "${_parts}" -eq 2 ]; then
@@ -562,12 +584,16 @@ download_and_verify_package() {
     run curl -fsSL --retry 3 --retry-delay 2 -o "${_sha_path}" "${_sha_url}"
 
     log_info "Verifying SHA256 checksum..."
+    # Any non-zero status here means the checksum entry was unusable, and we abort below.
+    # shellcheck disable=SC2310
     if ! _expected_sha="$(extract_expected_sha256 "${_sha_path}" "${_pkg_name}")"; then
       log_error "ERROR: Could not find a SHA256 entry for ${_pkg_name} in ${_sha_url}"
       exit 1
     fi
     _expected_sha=$(printf '%s' "${_expected_sha}" | tr '[:upper:]' '[:lower:]')
-    _actual_sha=$(sha256sum "${_pkg_path}" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
+    _actual_sha_line=$(sha256sum "${_pkg_path}")
+    _actual_sha=${_actual_sha_line%%[[:space:]]*}
+    _actual_sha=$(printf '%s' "${_actual_sha}" | tr '[:upper:]' '[:lower:]')
 
     if [ "${_expected_sha}" != "${_actual_sha}" ]; then
       log_error "ERROR: SHA256 checksum verification failed!"
@@ -588,13 +614,13 @@ install_package() {
   _install_root="/usr/local/microsoft/powershell"
   _install_path="${_install_root}/${_install_version}"
 
-  run ${SUDO}mkdir -p "${_install_path}"
+  run_root mkdir -p "${_install_path}"
   log_info "Extracting to: ${_install_path}"
-  run ${SUDO}tar -xzf "${_pkg_path}" -C "${_install_path}"
-  run ${SUDO}chmod +x "${_install_path}/pwsh"
+  run_root tar -xzf "${_pkg_path}" -C "${_install_path}"
+  run_root chmod +x "${_install_path}/pwsh"
 
   log_info "Linking pwsh to /usr/local/bin/pwsh"
-  run ${SUDO}ln -sfn "${_install_path}/pwsh" "/usr/local/bin/pwsh"
+  run_root ln -sfn "${_install_path}/pwsh" "/usr/local/bin/pwsh"
 }
 
 remove_previous_install_version() {
@@ -609,7 +635,7 @@ remove_previous_install_version() {
 
   if [ -d "${_previous_path}" ]; then
     log_info "Removing previous PowerShell version: ${_previous_version}"
-    run ${SUDO}rm -rf "${_previous_path}"
+    run_root rm -rf "${_previous_path}"
   else
     log_warn "Previous PowerShell version directory not found: ${_previous_path}"
   fi
@@ -620,10 +646,7 @@ check_latest() {
   check_network
 
   REL_DATA="$(resolve_release_metadata "" "${TARGET_SUFFIX}")"
-
-  REL_TAG=$(printf '%s\n' "${REL_DATA}" | awk '{print $1}')
-  PKG_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $2}')
-  PKG_NAME=$(printf '%s\n' "${REL_DATA}" | awk '{print $3}')
+  parse_release_metadata "${REL_DATA}"
 
   if [ -z "${PKG_URL}" ]; then
     log_error "ERROR: Could not find a ${TARGET_SUFFIX} asset in the latest release."
@@ -652,6 +675,8 @@ check_latest() {
   fi
 
   _cmp=0
+  # compare_versions intentionally reports ordering via exit status.
+  # shellcheck disable=SC2310
   if compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"; then
     _cmp=0
   else
@@ -674,11 +699,7 @@ main_install() {
   check_network
 
   REL_DATA="$(resolve_release_metadata "${TAG}" "${TARGET_SUFFIX}")"
-
-  REL_TAG=$(printf '%s\n' "${REL_DATA}" | awk '{print $1}')
-  PKG_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $2}')
-  PKG_NAME=$(printf '%s\n' "${REL_DATA}" | awk '{print $3}')
-  SHA_URL=$(printf '%s\n' "${REL_DATA}" | awk '{print $4}')
+  parse_release_metadata "${REL_DATA}"
 
   if [ -z "${PKG_URL}" ]; then
     if [ -n "${TAG}" ]; then
@@ -704,6 +725,8 @@ main_install() {
   fi
 
   if [ -n "${DESIRED_VERSION}" ] && [ -n "${INSTALLED_VERSION}" ]; then
+    # compare_versions intentionally reports ordering via exit status.
+    # shellcheck disable=SC2310
     if compare_versions "${INSTALLED_VERSION}" "${DESIRED_VERSION}"; then
       VERSION_CMP=0
     else
@@ -836,7 +859,8 @@ fi
 
 SUDO=""
 if [ "${CHECK_ONLY}" -eq 0 ]; then
-  if [ "$(id -u)" -ne 0 ]; then
+  CURRENT_UID="$(id -u)"
+  if [ "${CURRENT_UID}" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
       SUDO="sudo"
     else
@@ -865,13 +889,13 @@ if [ "${UNINSTALL}" -eq 1 ]; then
   INSTALL_ROOT="/usr/local/microsoft/powershell"
   if [ -d "${INSTALL_ROOT}" ]; then
     log "Removing ${INSTALL_ROOT}"
-    run ${SUDO}rm -rf "${INSTALL_ROOT}"
+    run_root rm -rf "${INSTALL_ROOT}"
   else
     log_warn "No PowerShell install found at ${INSTALL_ROOT}"
   fi
   if [ -L "/usr/local/bin/pwsh" ]; then
     log "Removing /usr/local/bin/pwsh"
-    run ${SUDO}rm -f "/usr/local/bin/pwsh"
+    run_root rm -f "/usr/local/bin/pwsh"
   fi
   log_success "Uninstall complete."
 
@@ -890,7 +914,7 @@ if [ "${UNINSTALL}" -eq 1 ]; then
   if [ -n "${USER_DIRS}" ]; then
     log ""
     log_warn "Note: The following user-specific directories still exist and may be removed manually:"
-    printf "${USER_DIRS}"
+    printf '%b' "${USER_DIRS}"
     log "To remove them, run: rm -rf ~/.config/powershell ~/.local/share/powershell ~/.cache/powershell"
   fi
 

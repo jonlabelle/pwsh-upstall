@@ -527,6 +527,8 @@ resolve_release_metadata() {
     return
   fi
 
+  # Predicate helper intentionally returns non-zero for non-semver selectors.
+  # shellcheck disable=SC2310
   if is_numeric_semver_selector "${selector}"; then
     local parts
     parts="$(semver_selector_part_count "${selector}")"
@@ -561,7 +563,7 @@ download_and_verify_package() {
   if [[ "${SKIP_CHECKSUM}" -eq 0 && -n "${sha_url}" ]]; then
     need_cmd shasum
     local sha_path="${pkg_path}.sha256"
-    local pkg_name
+    local pkg_name actual_sha_line
     pkg_name="$(basename "${pkg_path}")"
 
     log_info "Downloading checksum file..."
@@ -569,12 +571,16 @@ download_and_verify_package() {
 
     log_info "Verifying SHA256 checksum..."
     local expected_sha actual_sha
+    # Any non-zero status here means the checksum entry was unusable, and we abort below.
+    # shellcheck disable=SC2310
     if ! expected_sha="$(extract_expected_sha256 "${sha_path}" "${pkg_name}")"; then
       log_error "ERROR: Could not find a SHA256 entry for ${pkg_name} in ${sha_url}"
       exit 1
     fi
     expected_sha="$(printf '%s' "${expected_sha}" | tr '[:upper:]' '[:lower:]')"
-    actual_sha="$(shasum -a 256 "${pkg_path}" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')"
+    actual_sha_line="$(shasum -a 256 "${pkg_path}")"
+    actual_sha="${actual_sha_line%%[[:space:]]*}"
+    actual_sha="$(printf '%s' "${actual_sha}" | tr '[:upper:]' '[:lower:]')"
 
     if [[ "${expected_sha}" != "${actual_sha}" ]]; then
       log_error "ERROR: SHA256 checksum verification failed!"
@@ -592,7 +598,14 @@ download_and_verify_package() {
   log_info "Checking package signature..."
   run pkgutil --check-signature "${pkg_path}"
   if [[ "${DRY_RUN}" -eq 0 ]]; then
-    verify_microsoft_signature "${pkg_path}" || log_warn "Warning: Could not verify Microsoft signature"
+    local signature_status=0
+    set +e
+    verify_microsoft_signature "${pkg_path}"
+    signature_status=$?
+    set -e
+    if [[ "${signature_status}" -ne 0 ]]; then
+      log_warn "Warning: Could not verify Microsoft signature"
+    fi
   fi
 }
 
@@ -632,8 +645,9 @@ check_latest() {
   check_network
 
   local target_pkg_suffix="osx-${PKG_ARCH}.pkg"
-  local rel_tag pkg_url pkg_name sha_url
-  read -r rel_tag pkg_url pkg_name sha_url < <(resolve_release_metadata "" "${target_pkg_suffix}")
+  local rel_data rel_tag pkg_url pkg_name sha_url
+  rel_data="$(resolve_release_metadata "" "${target_pkg_suffix}")"
+  IFS=' ' read -r rel_tag pkg_url pkg_name sha_url <<<"${rel_data}"
 
   if [[ -z "${pkg_url}" ]]; then
     log_error "ERROR: Could not find an ${target_pkg_suffix} asset in the latest release."
@@ -662,6 +676,8 @@ check_latest() {
   fi
 
   local version_cmp=0
+  # compare_versions intentionally reports ordering via exit status.
+  # shellcheck disable=SC2310
   if compare_versions "${installed_version}" "${desired_version}"; then
     :
   else
@@ -684,8 +700,9 @@ main_install() {
   check_network
 
   local target_pkg_suffix="osx-${PKG_ARCH}.pkg"
-  local rel_tag pkg_url pkg_name sha_url
-  read -r rel_tag pkg_url pkg_name sha_url < <(resolve_release_metadata "${TAG}" "${target_pkg_suffix}")
+  local rel_data rel_tag pkg_url pkg_name sha_url
+  rel_data="$(resolve_release_metadata "${TAG}" "${target_pkg_suffix}")"
+  IFS=' ' read -r rel_tag pkg_url pkg_name sha_url <<<"${rel_data}"
 
   if [[ -z "${pkg_url}" ]]; then
     if [[ -n "${TAG}" ]]; then
@@ -712,6 +729,8 @@ main_install() {
   fi
 
   if [[ -n "${desired_version}" && -n "${installed_version}" ]]; then
+    # compare_versions intentionally reports ordering via exit status.
+    # shellcheck disable=SC2310
     if compare_versions "${installed_version}" "${desired_version}"; then
       version_cmp=0
     else
