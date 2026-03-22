@@ -312,31 +312,46 @@ extract_expected_sha256() {
   _asset_name="${2}"
 
   "${PYTHON}" - "${_checksum_path}" "${_asset_name}" <<'PY'
-import os, sys
+import os
+import re
+import sys
 
 checksum_path = sys.argv[1]
 asset_name = sys.argv[2]
 asset_basename = os.path.basename(asset_name)
+hex_pattern = re.compile(r"[0-9a-fA-F]{64}")
 
 with open(checksum_path, "r", encoding="utf-8", errors="replace") as f:
-    lines = [line.strip() for line in f if line.strip()]
+    lines = []
+    for raw_line in f:
+        line = raw_line.replace("\x00", "").strip()
+        if line:
+            lines.append(line)
 
+entries = []
 for line in lines:
     parts = line.split()
-    if len(parts) < 2:
+    if not parts:
         continue
 
-    candidate = parts[-1].lstrip("*")
+    match = hex_pattern.search(parts[0].lstrip("\ufeff\ufffd"))
+    if not match:
+        continue
+
+    checksum = match.group(0)
+    candidate = ""
+    if len(parts) > 1:
+        candidate = parts[-1].replace("\x00", "").lstrip("*").lstrip("\ufeff\ufffd")
+    entries.append((checksum, candidate))
+
     candidate_basename = os.path.basename(candidate)
     if candidate == asset_name or candidate_basename == asset_basename:
-        print(parts[0])
+        print(checksum)
         sys.exit(0)
 
-if lines:
-    parts = lines[0].split()
-    if parts:
-        print(parts[0])
-        sys.exit(0)
+if len(entries) == 1:
+    print(entries[0][0])
+    sys.exit(0)
 
 sys.exit(1)
 PY
