@@ -8,6 +8,8 @@ Platform-specific scripts to install/update PowerShell Core from GitHub releases
 - **Linux**: `pwsh-upstall-linux.sh` — x64/arm64, glibc/musl (Alpine)
 - **Windows**: `pwsh-upstall-windows.ps1` — x64/arm64
 
+Upgrades remove the previously active version by default. Use `--keep-old-version` or `-KeepOldVersion` to opt out.
+
 ![Checks if PowerShell is up to date](screenshot.png "Checks if PowerShell is up to date")
 
 ## Table of contents
@@ -126,6 +128,7 @@ powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.5.4
 | Save downloaded package/installer   | `--out-dir <dir>` | `-OutDir <path>` |
 | Keep downloaded package/installer   | `--keep`          | `-Keep`          |
 | Reinstall even if already installed | `--force`         | `-Force`         |
+| Keep old version during upgrade     | `--keep-old-version` | `-KeepOldVersion` |
 | Check only (no install)             | `--check`         | `-Check`         |
 | Uninstall                           | `--uninstall`     | `-Uninstall`     |
 | Skip SHA256 verification            | `--skip-checksum` | `-SkipChecksum`  |

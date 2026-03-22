@@ -31,6 +31,7 @@ set -euo pipefail
 #     --out-dir <dir>    Save downloaded package to specified directory
 #     --keep             Retain package after installation
 #     --force            Reinstall even if target version already installed
+#     --keep-old-version Preserve the previously installed version when upgrading
 #     --check            Only check if installed version is up to date
 #     --uninstall        Remove PowerShell and associated package receipts
 #     --skip-checksum    Skip SHA256 verification (not recommended)
@@ -65,6 +66,8 @@ set -euo pipefail
 #   - Automatically detects architecture (arm64 or x64)
 #   - Verifies Microsoft code signature and SHA256 checksums
 #   - Validates disk space before installation
+#   - Removes the previously active version after a successful upgrade
+#     unless --keep-old-version is used
 #   - Default behavior downloads latest stable release (not preview/RC)
 #   - Prereleases are supported only via explicit exact tag
 #     (default/latest/major/minor selection is stable-only)
@@ -79,6 +82,7 @@ TAG="" # e.g., v7.5.4
 KEEP=0
 OUT_DIR="" # optional destination directory for the downloaded pkg
 FORCE=0
+KEEP_OLD_VERSION=0
 UNINSTALL=0
 SKIP_CHECKSUM=0
 CHECK_ONLY=0
@@ -124,6 +128,7 @@ Options:
   --out-dir <dir>    Directory to save the downloaded .pkg (default: temp dir).
   --keep             Keep the downloaded .pkg after installation (default: delete unless --out-dir is used).
   --force            Reinstall even if the target version is already installed.
+  --keep-old-version Keep the previously installed version when upgrading.
   --check            Only check if installed version is up to date; no download or install.
   --uninstall        Uninstall PowerShell from the default install location.
   --skip-checksum    Skip SHA256 checksum verification (not recommended).
@@ -557,6 +562,24 @@ install_package() {
   run pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion'
 }
 
+remove_previous_install_version() {
+  local previous_version="${1}"
+  local target_version="${2}"
+  local target_root="/usr/local/microsoft/powershell"
+  local previous_path="${target_root}/${previous_version}"
+
+  if [[ -z "${previous_version}" || -z "${target_version}" || "${previous_version}" == "${target_version}" ]]; then
+    return 0
+  fi
+
+  if [[ -d "${previous_path}" ]]; then
+    log_info "Removing previous PowerShell version: ${previous_version}"
+    run sudo rm -rf "${previous_path}"
+  else
+    log_warn "Previous PowerShell version directory not found: ${previous_path}"
+  fi
+}
+
 check_latest() {
   log_info "Checking network connectivity..."
   check_network
@@ -631,38 +654,50 @@ main_install() {
   log "Selected package: ${pkg_name}"
   log "Download URL: ${pkg_url}"
 
+  local desired_version="${rel_tag#v}"
+  local installed_version=""
+  local version_cmp=0
+  local upgrade_from_version=""
+
+  if command -v pwsh >/dev/null 2>&1; then
+    # shellcheck disable=SC2016
+    installed_version="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
+  fi
+
+  if [[ -n "${desired_version}" && -n "${installed_version}" ]]; then
+    if compare_versions "${installed_version}" "${desired_version}"; then
+      version_cmp=0
+    else
+      version_cmp=$?
+    fi
+
+    if [[ ${version_cmp} -eq 1 ]]; then
+      upgrade_from_version="${installed_version}"
+    fi
+  fi
+
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     log "Dry-run summary:"
     log "  Would download: ${pkg_url}"
     log "  Would install : ${pkg_name}"
     log "  Would verify  : SHA256 checksum & Microsoft signature"
     log "  Would run     : sudo installer -pkg <downloaded-pkg> -target /"
+    if [[ -n "${upgrade_from_version}" ]]; then
+      if [[ "${KEEP_OLD_VERSION}" -eq 1 ]]; then
+        log "  Would keep    : previous version ${upgrade_from_version}"
+      else
+        log "  Would remove  : previous version ${upgrade_from_version} after successful upgrade"
+      fi
+    fi
     trap - EXIT TERM
     exit 0
   fi
 
   if [[ "${FORCE}" -eq 0 ]]; then
-    local installed_version=""
-    if command -v pwsh >/dev/null 2>&1; then
-      # shellcheck disable=SC2016
-      installed_version="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
-    fi
-
-    if [[ -n "${rel_tag}" && -n "${installed_version}" ]]; then
-      local desired_version="${rel_tag#v}"
-      if [[ -n "${desired_version}" ]]; then
-        local version_cmp=0
-        if compare_versions "${installed_version}" "${desired_version}"; then
-          :
-        else
-          version_cmp=$?
-        fi
-        if [[ ${version_cmp} -eq 0 ]]; then
-          log_warn "PowerShell ${installed_version} is already installed; skipping install. Use --force to reinstall."
-          trap - EXIT INT TERM
-          exit 0
-        fi
-      fi
+    if [[ -n "${desired_version}" && -n "${installed_version}" && ${version_cmp} -eq 0 ]]; then
+      log_warn "PowerShell ${installed_version} is already installed; skipping install. Use --force to reinstall."
+      trap - EXIT INT TERM
+      exit 0
     fi
   fi
 
@@ -683,6 +718,14 @@ main_install() {
 
   download_and_verify_package "${pkg_url}" "${pkg_path}" "${sha_url}"
   install_package "${pkg_path}"
+
+  if [[ -n "${upgrade_from_version}" ]]; then
+    if [[ "${KEEP_OLD_VERSION}" -eq 1 ]]; then
+      log_info "Keeping previous PowerShell version: ${upgrade_from_version}"
+    else
+      remove_previous_install_version "${upgrade_from_version}" "${desired_version}"
+    fi
+  fi
 
   # Cleanup
   if [[ "${KEEP}" -eq 1 || -n "${OUT_DIR}" ]]; then
@@ -798,6 +841,10 @@ while [[ $# -gt 0 ]]; do
     FORCE=1
     shift
     ;;
+  --keep-old-version)
+    KEEP_OLD_VERSION=1
+    shift
+    ;;
   --check)
     CHECK_ONLY=1
     shift
@@ -827,7 +874,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
-  if [[ -n "${TAG}" || -n "${OUT_DIR}" || "${KEEP}" -eq 1 || "${FORCE}" -eq 1 || "${UNINSTALL}" -eq 1 || "${SKIP_CHECKSUM}" -eq 1 ]]; then
+  if [[ -n "${TAG}" || -n "${OUT_DIR}" || "${KEEP}" -eq 1 || "${FORCE}" -eq 1 || "${KEEP_OLD_VERSION}" -eq 1 || "${UNINSTALL}" -eq 1 || "${SKIP_CHECKSUM}" -eq 1 ]]; then
     log_error "ERROR: --check cannot be combined with install/uninstall options."
     exit 1
   fi

@@ -33,6 +33,9 @@
     .PARAMETER Force
         Reinstall even if the target version is already installed.
 
+    .PARAMETER KeepOldVersion
+        Keep the previously installed version during upgrade by skipping the explicit uninstall step.
+
     .PARAMETER Check
         Only check if the installed version is up to date with the latest available release.
 
@@ -102,6 +105,7 @@
         - Performs silent installation with msiexec
         - Validates disk space before installation
         - Uses semantic version comparison to detect upgrades
+        - Removes the older version before upgrade unless -KeepOldVersion is used
 
         Default behavior downloads the latest stable release (not preview/RC).
         Prereleases are supported only via explicit exact tag
@@ -122,6 +126,7 @@ param(
     [string]$OutDir,
     [switch]$Keep,
     [switch]$Force,
+    [switch]$KeepOldVersion,
     [switch]$Check,
     [switch]$Uninstall,
     [switch]$SkipChecksum
@@ -150,7 +155,7 @@ function Write-Success
     Write-Host $Message -ForegroundColor Green
 }
 
-if ($Check -and ($Tag -or $OutDir -or $Keep -or $Force -or $Uninstall -or $SkipChecksum))
+if ($Check -and ($Tag -or $OutDir -or $Keep -or $Force -or $KeepOldVersion -or $Uninstall -or $SkipChecksum))
 {
     Write-Error 'The -Check option cannot be combined with install/uninstall options.'
     exit 1
@@ -446,6 +451,62 @@ function Get-InstalledPwshVersion
     return $null
 }
 
+function Show-RemainingPwshUserDirs
+{
+    $userDirs = @()
+    $docsPath = Join-Path $env:USERPROFILE 'Documents\PowerShell'
+    $localPath = Join-Path $env:LOCALAPPDATA 'Microsoft\PowerShell'
+    $roamingPath = Join-Path $env:APPDATA 'Microsoft\PowerShell'
+
+    if (Test-Path $docsPath) { $userDirs += $docsPath }
+    if (Test-Path $localPath) { $userDirs += $localPath }
+    if (Test-Path $roamingPath) { $userDirs += $roamingPath }
+
+    if ($userDirs.Count -gt 0)
+    {
+        Write-Host ''
+        Write-Warn 'Note: The following user-specific directories still exist and may be removed manually:'
+        foreach ($dir in $userDirs)
+        {
+            Write-Warn "  $dir"
+        }
+        Write-Info 'To remove them, run: Remove-Item -Recurse -Force ~\Documents\PowerShell, $env:LOCALAPPDATA\Microsoft\PowerShell, $env:APPDATA\Microsoft\PowerShell'
+    }
+}
+
+function Invoke-PwshUninstallCommand
+{
+    param(
+        [Parameter(Mandatory = $true)]
+        $Info,
+        [switch]$SkipUserDirNotice
+    )
+
+    $exe = $Info.UninstallString
+    $uninstallArgs = $null
+    if ($exe -match '^\s*"?([^"\s]+\.exe)"?\s+(.*)$')
+    {
+        $exe = $matches[1]
+        $uninstallArgs = $matches[2]
+    }
+
+    if ($exe -match 'msiexec' -and $uninstallArgs -notmatch '/q[nrb]?')
+    {
+        $uninstallArgs += ' /qn /norestart'
+    }
+
+    $proc = Start-Process -FilePath $exe -ArgumentList $uninstallArgs -Wait -PassThru
+    if ($proc.ExitCode -ne 0)
+    {
+        throw "Uninstall failed with exit code: $($proc.ExitCode)"
+    }
+
+    if (-not $SkipUserDirNotice)
+    {
+        Show-RemainingPwshUserDirs
+    }
+}
+
 $arch = Get-OsArch
 Write-Verbose "Detected architecture: $arch"
 
@@ -524,44 +585,14 @@ if ($Uninstall)
     Write-Info "Found PowerShell install: $($info.DisplayName)"
     if ($PSCmdlet.ShouldProcess($info.DisplayName, "Uninstall via $($info.UninstallString)"))
     {
-        $exe = $info.UninstallString
-        $uninstallArgs = $null
-        if ($exe -match '^\s*"?([^"\s]+\.exe)"?\s+(.*)$')
+        try
         {
-            $exe = $matches[1]
-            $uninstallArgs = $matches[2]
+            Invoke-PwshUninstallCommand -Info $info
         }
-        # Add quiet mode flags for automated uninstall
-        if ($exe -match 'msiexec' -and $uninstallArgs -notmatch '/q[nrb]?')
+        catch
         {
-            $uninstallArgs += ' /qn /norestart'
-        }
-        $proc = Start-Process -FilePath $exe -ArgumentList $uninstallArgs -Wait -PassThru
-        if ($proc.ExitCode -ne 0)
-        {
-            Write-Error "Uninstall failed with exit code: $($proc.ExitCode)"
-            exit $proc.ExitCode
-        }
-
-        # Check for user-specific directories that may need manual cleanup
-        $userDirs = @()
-        $docsPath = Join-Path $env:USERPROFILE 'Documents\PowerShell'
-        $localPath = Join-Path $env:LOCALAPPDATA 'Microsoft\PowerShell'
-        $roamingPath = Join-Path $env:APPDATA 'Microsoft\PowerShell'
-
-        if (Test-Path $docsPath) { $userDirs += $docsPath }
-        if (Test-Path $localPath) { $userDirs += $localPath }
-        if (Test-Path $roamingPath) { $userDirs += $roamingPath }
-
-        if ($userDirs.Count -gt 0)
-        {
-            Write-Host ''
-            Write-Warn 'Note: The following user-specific directories still exist and may be removed manually:'
-            foreach ($dir in $userDirs)
-            {
-                Write-Warn "  $dir"
-            }
-            Write-Info 'To remove them, run: Remove-Item -Recurse -Force ~\Documents\PowerShell, $env:LOCALAPPDATA\Microsoft\PowerShell, $env:APPDATA\Microsoft\PowerShell'
+            Write-Error $_
+            exit 1
         }
     }
     return
@@ -584,17 +615,30 @@ Write-Info "Selected PowerShell release: $releaseTag"
 Write-Info "Selected installer: $($asset.name)"
 Write-Info "Download URL: $($asset.browser_download_url)"
 
+$installed = Get-InstalledPwshVersion
+$versionComparison = $null
+$upgradeFromVersion = $null
+$upgradeUninstallInfo = $null
+
+if ($installed -and $targetVersion)
+{
+    $versionComparison = Compare-SemanticVersion -Version1 $installed -Version2 $targetVersion
+    if ($versionComparison -lt 0)
+    {
+        $upgradeFromVersion = $installed
+        if (-not $KeepOldVersion)
+        {
+            $upgradeUninstallInfo = Get-PwshUninstallInfo
+        }
+    }
+}
+
 if (-not $Force)
 {
-    $installed = Get-InstalledPwshVersion
-    if ($installed -and $targetVersion)
+    if ($installed -and $targetVersion -and $versionComparison -eq 0)
     {
-        $cmp = Compare-SemanticVersion -Version1 $installed -Version2 $targetVersion
-        if ($cmp -eq 0)
-        {
-            Write-Warn "PowerShell $installed is already installed; use -Force to reinstall."
-            return
-        }
+        Write-Warn "PowerShell $installed is already installed; use -Force to reinstall."
+        return
     }
 }
 
@@ -622,6 +666,21 @@ if ($WhatIfPreference)
         Write-Host '  Would verify  : SHA256 checksum'
     }
     Write-Host '  Would run     : msiexec.exe /i <downloaded-msi> /qn /norestart'
+    if ($upgradeFromVersion)
+    {
+        if ($KeepOldVersion)
+        {
+            Write-Host "  Would keep    : previous version $upgradeFromVersion"
+        }
+        elseif ($upgradeUninstallInfo)
+        {
+            Write-Host "  Would remove  : previous version $upgradeFromVersion before install"
+        }
+        else
+        {
+            Write-Host "  Would attempt : to remove previous version $upgradeFromVersion before install (no MSI uninstall entry found yet)"
+        }
+    }
     return
 }
 
@@ -639,6 +698,26 @@ New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
 
 try
 {
+    if ($upgradeFromVersion)
+    {
+        if ($KeepOldVersion)
+        {
+            Write-Info "Keeping previous PowerShell version $upgradeFromVersion during upgrade (-KeepOldVersion)."
+        }
+        elseif ($upgradeUninstallInfo)
+        {
+            Write-Info "Removing previous PowerShell version $upgradeFromVersion before upgrade..."
+            if ($PSCmdlet.ShouldProcess($upgradeUninstallInfo.DisplayName, "Remove older version $upgradeFromVersion before installing $targetVersion"))
+            {
+                Invoke-PwshUninstallCommand -Info $upgradeUninstallInfo -SkipUserDirNotice
+            }
+        }
+        else
+        {
+            Write-Warn "Upgrade detected from $upgradeFromVersion to $targetVersion, but no MSI uninstall entry was found; proceeding without explicit removal."
+        }
+    }
+
     $installerPath = Join-Path $dlDir $asset.name
 
     if (Test-Path $installerPath)
