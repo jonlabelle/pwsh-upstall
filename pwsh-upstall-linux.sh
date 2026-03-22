@@ -287,6 +287,41 @@ except Exception:
 PY
 }
 
+extract_expected_sha256() {
+  _checksum_path="${1}"
+  _asset_name="${2}"
+
+  "${PYTHON}" - "${_checksum_path}" "${_asset_name}" <<'PY'
+import os, sys
+
+checksum_path = sys.argv[1]
+asset_name = sys.argv[2]
+asset_basename = os.path.basename(asset_name)
+
+with open(checksum_path, "r", encoding="utf-8", errors="replace") as f:
+    lines = [line.strip() for line in f if line.strip()]
+
+for line in lines:
+    parts = line.split()
+    if len(parts) < 2:
+        continue
+
+    candidate = parts[-1].lstrip("*")
+    candidate_basename = os.path.basename(candidate)
+    if candidate == asset_name or candidate_basename == asset_basename:
+        print(parts[0])
+        sys.exit(0)
+
+if lines:
+    parts = lines[0].split()
+    if parts:
+        print(parts[0])
+        sys.exit(0)
+
+sys.exit(1)
+PY
+}
+
 get_release_metadata() {
   _release_url="${1}"
   _target_suffix="${2}"
@@ -310,9 +345,12 @@ tag = data.get("tag_name") or ""
 assets = data.get("assets") or []
 candidates = []
 sha_url = ""
+hashes_url = ""
 for a in assets:
     name = a.get("name") or ""
     url = a.get("browser_download_url") or ""
+    if name == "hashes.sha256":
+        hashes_url = url
     if target in name and name.endswith(".tar.gz"):
         candidates.append((name, url))
     elif name.endswith(".tar.gz.sha256") and target in name:
@@ -335,6 +373,8 @@ if candidates:
         if a.get("name") == sha_name:
             sha_url = a.get("browser_download_url") or ""
             break
+    if not sha_url:
+        sha_url = hashes_url
     print(tag, url, name, sha_url)
 else:
     print(tag, "", "", "")
@@ -400,10 +440,13 @@ def pick_asset(release):
     assets = release.get("assets") or []
     candidates = []
     sha_url = ""
+    hashes_url = ""
 
     for asset in assets:
         name = asset.get("name") or ""
         url = asset.get("browser_download_url") or ""
+        if name == "hashes.sha256":
+            hashes_url = url
         if target in name and name.endswith(".tar.gz"):
             candidates.append((name, url))
         elif name.endswith(".tar.gz.sha256") and target in name:
@@ -431,6 +474,8 @@ def pick_asset(release):
         if (asset.get("name") or "") == sha_name:
             sha_url = asset.get("browser_download_url") or ""
             break
+    if not sha_url:
+        sha_url = hashes_url
 
     return url, name, sha_url
 
@@ -511,16 +556,18 @@ download_and_verify_package() {
   if [ "${SKIP_CHECKSUM}" -eq 0 ] && [ -n "${_sha_url}" ]; then
     need_cmd sha256sum
     _sha_path="${_pkg_path}.sha256"
-    _dl_dir="$(dirname "${_pkg_path}")"
     _pkg_name="$(basename "${_pkg_path}")"
 
     log_info "Downloading checksum file..."
     run curl -fsSL --retry 3 --retry-delay 2 -o "${_sha_path}" "${_sha_url}"
 
     log_info "Verifying SHA256 checksum..."
-    cd "${_dl_dir}"
-    _expected_sha=$(cat "${_sha_path}" | awk '{print $1}')
-    _actual_sha=$(sha256sum "${_pkg_name}" | awk '{print $1}')
+    if ! _expected_sha="$(extract_expected_sha256 "${_sha_path}" "${_pkg_name}")"; then
+      log_error "ERROR: Could not find a SHA256 entry for ${_pkg_name} in ${_sha_url}"
+      exit 1
+    fi
+    _expected_sha=$(printf '%s' "${_expected_sha}" | tr '[:upper:]' '[:lower:]')
+    _actual_sha=$(sha256sum "${_pkg_path}" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')
 
     if [ "${_expected_sha}" != "${_actual_sha}" ]; then
       log_error "ERROR: SHA256 checksum verification failed!"

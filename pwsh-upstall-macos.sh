@@ -293,6 +293,41 @@ except Exception:
 PY
 }
 
+extract_expected_sha256() {
+  local checksum_path="${1}"
+  local asset_name="${2}"
+
+  "${PYTHON}" - "${checksum_path}" "${asset_name}" <<'PY'
+import os, sys
+
+checksum_path = sys.argv[1]
+asset_name = sys.argv[2]
+asset_basename = os.path.basename(asset_name)
+
+with open(checksum_path, "r", encoding="utf-8", errors="replace") as f:
+    lines = [line.strip() for line in f if line.strip()]
+
+for line in lines:
+    parts = line.split()
+    if len(parts) < 2:
+        continue
+
+    candidate = parts[-1].lstrip("*")
+    candidate_basename = os.path.basename(candidate)
+    if candidate == asset_name or candidate_basename == asset_basename:
+        print(parts[0])
+        sys.exit(0)
+
+if lines:
+    parts = lines[0].split()
+    if parts:
+        print(parts[0])
+        sys.exit(0)
+
+sys.exit(1)
+PY
+}
+
 get_release_metadata() {
   local release_url="${1}"
   local target_pkg_suffix="${2}"
@@ -317,9 +352,12 @@ tag = data.get("tag_name") or ""
 
 assets = data.get("assets") or []
 candidates = []
+hashes_url = ""
 for a in assets:
   name = a.get("name") or ""
   url  = a.get("browser_download_url") or ""
+  if name == "hashes.sha256":
+    hashes_url = url
   # Prefer the official macOS pkg for the detected architecture
   if target_suffix in name and name.endswith(".pkg"):
     candidates.append((name, url))
@@ -347,6 +385,8 @@ else:
     if a.get("name") == sha_name:
       sha_url = a.get("browser_download_url") or ""
       break
+  if not sha_url:
+    sha_url = hashes_url
   print(tag, url, name, sha_url)
 PY
 }
@@ -407,9 +447,12 @@ def parse_version_tag(tag):
 def pick_asset(release):
   assets = release.get("assets") or []
   candidates = []
+  hashes_url = ""
   for asset in assets:
     name = asset.get("name") or ""
     url = asset.get("browser_download_url") or ""
+    if name == "hashes.sha256":
+      hashes_url = url
     if target_suffix in name and name.endswith(".pkg"):
       candidates.append((name, url))
 
@@ -436,6 +479,8 @@ def pick_asset(release):
     if (asset.get("name") or "") == sha_name:
       sha_url = asset.get("browser_download_url") or ""
       break
+  if not sha_url:
+    sha_url = hashes_url
 
   return url, name, sha_url
 
@@ -516,18 +561,20 @@ download_and_verify_package() {
   if [[ "${SKIP_CHECKSUM}" -eq 0 && -n "${sha_url}" ]]; then
     need_cmd shasum
     local sha_path="${pkg_path}.sha256"
-    local dl_dir pkg_name
-    dl_dir="$(dirname "${pkg_path}")"
+    local pkg_name
     pkg_name="$(basename "${pkg_path}")"
 
     log_info "Downloading checksum file..."
     run curl -fsSL --retry 3 --retry-delay 2 -o "${sha_path}" "${sha_url}"
 
     log_info "Verifying SHA256 checksum..."
-    cd "${dl_dir}"
     local expected_sha actual_sha
-    expected_sha=$(cat "${sha_path}" | awk '{print $1}')
-    actual_sha=$(shasum -a 256 "${pkg_name}" | awk '{print $1}')
+    if ! expected_sha="$(extract_expected_sha256 "${sha_path}" "${pkg_name}")"; then
+      log_error "ERROR: Could not find a SHA256 entry for ${pkg_name} in ${sha_url}"
+      exit 1
+    fi
+    expected_sha="$(printf '%s' "${expected_sha}" | tr '[:upper:]' '[:lower:]')"
+    actual_sha="$(shasum -a 256 "${pkg_path}" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')"
 
     if [[ "${expected_sha}" != "${actual_sha}" ]]; then
       log_error "ERROR: SHA256 checksum verification failed!"

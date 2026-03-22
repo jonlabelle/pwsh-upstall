@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/jonlabelle/pwsh-upstall/actions/workflows/ci.yml/badge.svg)](https://github.com/jonlabelle/pwsh-upstall/actions/workflows/ci.yml)
 
-Platform-specific scripts to install/update PowerShell Core from GitHub releases with SHA256 verification.
+Platform-specific scripts to install/update PowerShell Core from GitHub releases with SHA256 verification, including shared `hashes.sha256` manifests.
 
 - **macOS**: `pwsh-upstall-macos.sh` — Apple Silicon & Intel
 - **Linux**: `pwsh-upstall-linux.sh` — x64/arm64, glibc/musl (Alpine)

@@ -577,11 +577,51 @@ function Select-Asset
     # Find corresponding SHA256 file
     $shaName = $selected.name + '.sha256'
     $shaAsset = $Release.assets | Where-Object { $_.name -eq $shaName } | Select-Object -First 1
+    if (-not $shaAsset)
+    {
+        $shaAsset = $Release.assets | Where-Object { $_.name -eq 'hashes.sha256' } | Select-Object -First 1
+    }
 
     return [PSCustomObject]@{
         Asset = $selected
         ShaAsset = $shaAsset
     }
+}
+
+function Get-ExpectedSha256
+{
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ChecksumPath,
+        [Parameter(Mandatory = $true)]
+        [string]$AssetName
+    )
+
+    $assetLeaf = Split-Path -Path $AssetName -Leaf
+    $lines = @(Get-Content -Path $ChecksumPath | Where-Object { $_.Trim() })
+
+    foreach ($line in $lines)
+    {
+        $parts = $line.Trim() -split '\s+'
+        if ($parts.Count -lt 2)
+        {
+            continue
+        }
+
+        $candidate = $parts[-1].TrimStart('*')
+        $candidateLeaf = Split-Path -Path $candidate -Leaf
+        if ($candidate -ieq $AssetName -or $candidateLeaf -ieq $assetLeaf)
+        {
+            return $parts[0]
+        }
+    }
+
+    if ($lines.Count -gt 0)
+    {
+        return (($lines[0].Trim() -split '\s+')[0])
+    }
+
+    throw "Could not determine expected SHA256 for '$AssetName' from '$ChecksumPath'."
 }
 
 function Get-InstalledPwshVersion
@@ -894,8 +934,8 @@ try
         }
 
         Write-Info 'Verifying SHA256 checksum...'
-        $expectedSha = (Get-Content $shaPath -Raw).Split()[0]
-        $actualSha = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash
+        $expectedSha = (Get-ExpectedSha256 -ChecksumPath $shaPath -AssetName $asset.name).ToUpperInvariant()
+        $actualSha = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToUpperInvariant()
 
         if ($expectedSha -ne $actualSha)
         {
