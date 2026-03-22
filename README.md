@@ -122,18 +122,18 @@ powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.5.4
 
 ### Option mapping
 
-| Purpose                             | macOS/Linux       | Windows          |
-| ----------------------------------- | ----------------- | ---------------- |
-| Select version                      | `--tag <tag>`     | `-Tag <tag>`     |
-| Save downloaded package/installer   | `--out-dir <dir>` | `-OutDir <path>` |
-| Keep downloaded package/installer   | `--keep`          | `-Keep`          |
-| Reinstall even if already installed | `--force`         | `-Force`         |
+| Purpose                             | macOS/Linux          | Windows           |
+| ----------------------------------- | -------------------- | ----------------- |
+| Select version                      | `--tag <tag>`        | `-Tag <tag>`      |
+| Save downloaded package/installer   | `--out-dir <dir>`    | `-OutDir <path>`  |
+| Keep downloaded package/installer   | `--keep`             | `-Keep`           |
+| Reinstall even if already installed | `--force`            | `-Force`          |
 | Keep old version during upgrade     | `--keep-old-version` | `-KeepOldVersion` |
-| Check only (no install)             | `--check`         | `-Check`         |
-| Uninstall                           | `--uninstall`     | `-Uninstall`     |
-| Skip SHA256 verification            | `--skip-checksum` | `-SkipChecksum`  |
-| Dry run                             | `-n, --dry-run`   | `-WhatIf`        |
-| Help                                | `-h, --help`      | N/A              |
+| Check only (no install)             | `--check`            | `-Check`          |
+| Uninstall                           | `--uninstall`        | `-Uninstall`      |
+| Skip SHA256 verification            | `--skip-checksum`    | `-SkipChecksum`   |
+| Dry run                             | `-n, --dry-run`      | `-WhatIf`         |
+| Help                                | `-h, --help`         | N/A               |
 
 > [!Note]
 > **Windows** automatically detects x64/arm64 architecture, requires Administrator privileges, and installs to `Program Files\PowerShell\7`.
