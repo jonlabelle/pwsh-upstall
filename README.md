@@ -39,14 +39,17 @@ curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/
 
 #### Windows
 
+> [!Important]
+> Requires Administrator privileges. Run from an [elevated PowerShell prompt](https://learn.microsoft.com/powershell/scripting/windows-powershell/starting-windows-powershell#run-with-administrative-privileges).
+
 ```powershell
-# Requires elevated privileges
 irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-windows.ps1' |
     powershell -NoProfile -ExecutionPolicy Bypass -
 ```
 
 > [!Note]
 > Run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`), to avoid process-in-use errors.
+> If you need `-Tag`, `-Check`, `-WhatIf`, or other script parameters, use `powershell -File .\pwsh-upstall-windows.ps1 ...` instead; `powershell.exe -` does not pass script arguments through stdin mode.
 
 ---
 
@@ -144,6 +147,7 @@ powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.5.4
 - **Insufficient disk space**: Requires 500MB minimum free space.
 - **Permission denied**: Run with sudo (Linux/macOS) or as Administrator (Windows).
 - **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead.
+- **Windows parameters with one-liners**: The stdin launcher is fine for the default install, but `powershell.exe -` cannot accept extra script parameters. Use `powershell -File .\pwsh-upstall-windows.ps1 ...` for `-Tag`, `-Check`, `-WhatIf`, and similar options.
 
 ## License
 

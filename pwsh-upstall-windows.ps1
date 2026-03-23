@@ -1,5 +1,3 @@
-#requires -RunAsAdministrator
-
 <#
     .SYNOPSIS
         Install, upgrade, or uninstall Microsoft PowerShell on Windows from GitHub Releases.
@@ -120,860 +118,882 @@
     .LINK
         https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-windows.ps1
 #>
-[CmdletBinding(SupportsShouldProcess = $true)]
-param(
-    [string]$Tag,
-    [string]$OutDir,
-    [switch]$Keep,
-    [switch]$Force,
-    [switch]$KeepOldVersion,
-    [switch]$Check,
-    [switch]$Uninstall,
-    [switch]$SkipChecksum
-)
-
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-
-$apiBase = 'https://api.github.com/repos/PowerShell/PowerShell'
-$script:InvokeRestMethodSupportsBasicParsing = $false
-$script:InvokeWebRequestSupportsBasicParsing = $false
-
-try
+function Invoke-PwshUpstallWindows
 {
-    $script:InvokeRestMethodSupportsBasicParsing = (Get-Command -Name Invoke-RestMethod -ErrorAction Stop).Parameters.ContainsKey('UseBasicParsing')
-}
-catch { }
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [string]$Tag,
+        [string]$OutDir,
+        [switch]$Keep,
+        [switch]$Force,
+        [switch]$KeepOldVersion,
+        [switch]$Check,
+        [switch]$Uninstall,
+        [switch]$SkipChecksum
+    )
 
-try
-{
-    $script:InvokeWebRequestSupportsBasicParsing = (Get-Command -Name Invoke-WebRequest -ErrorAction Stop).Parameters.ContainsKey('UseBasicParsing')
-}
-catch { }
+    $ErrorActionPreference = 'Stop'
+    $ProgressPreference = 'SilentlyContinue'
 
-function Write-Info
-{
-    param([string]$Message)
-    Write-Host $Message -ForegroundColor Cyan
-}
+    $apiBase = 'https://api.github.com/repos/PowerShell/PowerShell'
+    $script:InvokeRestMethodSupportsBasicParsing = $false
+    $script:InvokeWebRequestSupportsBasicParsing = $false
 
-function Write-Warn
-{
-    param([string]$Message)
-    Write-Host $Message -ForegroundColor Yellow
-}
-
-function Write-Success
-{
-    param([string]$Message)
-    Write-Host $Message -ForegroundColor Green
-}
-
-function Enable-Tls12
-{
     try
     {
-        $tls12 = [System.Net.SecurityProtocolType]::Tls12
-        $currentProtocols = [System.Net.ServicePointManager]::SecurityProtocol
+        $script:InvokeRestMethodSupportsBasicParsing = (Get-Command -Name Invoke-RestMethod -ErrorAction Stop).Parameters.ContainsKey('UseBasicParsing')
+    }
+    catch { }
 
-        if (($currentProtocols -band $tls12) -ne $tls12)
+    try
+    {
+        $script:InvokeWebRequestSupportsBasicParsing = (Get-Command -Name Invoke-WebRequest -ErrorAction Stop).Parameters.ContainsKey('UseBasicParsing')
+    }
+    catch { }
+
+    function Write-Info
+    {
+        param([string]$Message)
+        Write-Host $Message -ForegroundColor Cyan
+    }
+
+    function Write-Warn
+    {
+        param([string]$Message)
+        Write-Host $Message -ForegroundColor Yellow
+    }
+
+    function Write-Success
+    {
+        param([string]$Message)
+        Write-Host $Message -ForegroundColor Green
+    }
+
+    function Assert-RunAsAdministrator
+    {
+        $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
+
+        if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
         {
-            [System.Net.ServicePointManager]::SecurityProtocol = $currentProtocols -bor $tls12
+            throw 'This script must be run from an elevated Windows PowerShell session (Run as Administrator).'
         }
     }
-    catch
+
+    function Enable-Tls12
     {
-        Write-Verbose "Could not enable TLS 1.2 for web requests: $_"
-    }
-}
-
-function Invoke-CompatRestMethod
-{
-    param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Parameters
-    )
-
-    if ($script:InvokeRestMethodSupportsBasicParsing)
-    {
-        $Parameters['UseBasicParsing'] = $true
-    }
-
-    Invoke-RestMethod @Parameters
-}
-
-function Invoke-CompatWebRequest
-{
-    param(
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Parameters
-    )
-
-    if ($script:InvokeWebRequestSupportsBasicParsing)
-    {
-        $Parameters['UseBasicParsing'] = $true
-    }
-
-    Invoke-WebRequest @Parameters
-}
-
-function Remove-VersionPrefix
-{
-    param([string]$Value)
-
-    if ($null -eq $Value)
-    {
-        return $null
-    }
-
-    return ($Value -replace '^[vV]', '')
-}
-
-function Get-RegistryViews
-{
-    if ([Environment]::Is64BitOperatingSystem)
-    {
-        return @(
-            [Microsoft.Win32.RegistryView]::Registry64,
-            [Microsoft.Win32.RegistryView]::Registry32
-        )
-    }
-
-    return @([Microsoft.Win32.RegistryView]::Default)
-}
-
-Enable-Tls12
-
-if ($Check -and ($Tag -or $OutDir -or $Keep -or $Force -or $KeepOldVersion -or $Uninstall -or $SkipChecksum))
-{
-    Write-Error 'The -Check option cannot be combined with install/uninstall options.'
-    exit 1
-}
-
-function Test-NetworkConnectivity
-{
-    # Skip network check in WhatIf mode to allow preview without connectivity
-    if ($WhatIfPreference)
-    {
-        return $true
-    }
-
-    try
-    {
-        $null = Invoke-CompatRestMethod -Parameters @{
-            Uri = 'https://api.github.com'
-            TimeoutSec = 10
-            ErrorAction = 'Stop'
-        }
-        return $true
-    }
-    catch
-    {
-        Write-Error -Message 'Cannot reach GitHub API. Check your internet connection.' -ErrorAction Continue
-        return $false
-    }
-}
-
-function Test-DiskSpace
-{
-    param(
-        [string]$Path,
-        [int]$RequiredMB = 500
-    )
-
-    try
-    {
-        $drive = [System.IO.Path]::GetPathRoot($Path)
-        $driveName = $drive -replace '[:\\]+$', ''
-        $driveInfo = Get-PSDrive -Name $driveName -ErrorAction Stop
-        $availableMB = [math]::Round($driveInfo.Free / 1MB)
-
-        Write-Verbose "Disk space check: ${availableMB}MB available on $drive"
-
-        if ($availableMB -lt $RequiredMB)
-        {
-            Write-Error -Message "Insufficient disk space. Required: ${RequiredMB}MB, Available: ${availableMB}MB" -ErrorAction Continue
-            return $false
-        }
-        return $true
-    }
-    catch
-    {
-        Write-Warning "Could not determine disk space: $_"
-        return $true
-    }
-}
-
-function Compare-SemanticVersion
-{
-    param(
-        [string]$Version1,
-        [string]$Version2
-    )
-
-    try
-    {
-        $v1 = [version](Remove-VersionPrefix -Value $Version1)
-        $v2 = [version](Remove-VersionPrefix -Value $Version2)
-
-        if ($v1 -eq $v2) { return 0 }
-        if ($v1 -lt $v2) { return -1 }
-        return 1
-    }
-    catch
-    {
-        # Fallback to string comparison
-        return [string]::Compare($Version1, $Version2)
-    }
-}
-
-function Get-OsArch
-{
-    $arch = $env:PROCESSOR_ARCHITEW6432
-    if (-not $arch)
-    {
-        $arch = $env:PROCESSOR_ARCHITECTURE
-    }
-
-    switch -Regex ($arch.ToUpperInvariant())
-    {
-        '^(AMD64|X86_64)$' { return 'x64' }
-        '^ARM64$' { return 'arm64' }
-        '^X86$' { throw '32-bit x86 Windows is not supported by PowerShell MSI releases.' }
-        default { throw "Unsupported architecture: $arch" }
-    }
-}
-
-function Get-PwshUninstallInfo
-{
-    $uninstallSubKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
-
-    foreach ($view in Get-RegistryViews)
-    {
-        $baseKey = $null
-        $uninstallKey = $null
-
         try
         {
-            $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $view)
-            $uninstallKey = $baseKey.OpenSubKey($uninstallSubKey)
-            if ($null -eq $uninstallKey) { continue }
+            $tls12 = [System.Net.SecurityProtocolType]::Tls12
+            $currentProtocols = [System.Net.ServicePointManager]::SecurityProtocol
 
-            foreach ($subKeyName in $uninstallKey.GetSubKeyNames())
+            if (($currentProtocols -band $tls12) -ne $tls12)
             {
-                $itemKey = $null
-
-                try
-                {
-                    $itemKey = $uninstallKey.OpenSubKey($subKeyName)
-                    if ($null -eq $itemKey) { continue }
-
-                    $displayName = $itemKey.GetValue('DisplayName')
-                    $uninstallString = $itemKey.GetValue('UninstallString')
-                    $isSupportedPwshInstall = $displayName -and $displayName -notmatch 'x86' -and (
-                        $displayName -match '^PowerShell 7' -or
-                        ($displayName -match '^PowerShell\b' -and $displayName -match 'x64|arm64|7')
-                    )
-
-                    if ($isSupportedPwshInstall)
-                    {
-                        if ($uninstallString)
-                        {
-                            return [PSCustomObject]@{
-                                DisplayName = $displayName
-                                UninstallString = $uninstallString
-                            }
-                        }
-                    }
-                }
-                finally
-                {
-                    if ($itemKey)
-                    {
-                        $itemKey.Close()
-                    }
-                }
+                [System.Net.ServicePointManager]::SecurityProtocol = $currentProtocols -bor $tls12
             }
         }
         catch
         {
-            Write-Verbose "Failed to inspect uninstall registry view [$view]: $_"
+            Write-Verbose "Could not enable TLS 1.2 for web requests: $_"
         }
-        finally
+    }
+
+    function Invoke-CompatRestMethod
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            [hashtable]$Parameters
+        )
+
+        if ($script:InvokeRestMethodSupportsBasicParsing)
         {
-            if ($uninstallKey)
-            {
-                $uninstallKey.Close()
-            }
+            $Parameters['UseBasicParsing'] = $true
+        }
 
-            if ($baseKey)
-            {
-                $baseKey.Close()
+        Invoke-RestMethod @Parameters
+    }
+
+    function Invoke-CompatWebRequest
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            [hashtable]$Parameters
+        )
+
+        if ($script:InvokeWebRequestSupportsBasicParsing)
+        {
+            $Parameters['UseBasicParsing'] = $true
+        }
+
+        Invoke-WebRequest @Parameters
+    }
+
+    function Remove-VersionPrefix
+    {
+        param([string]$Value)
+
+        if ($null -eq $Value)
+        {
+            return $null
+        }
+
+        return ($Value -replace '^[vV]', '')
+    }
+
+    function Get-RegistryViews
+    {
+        if ([Environment]::Is64BitOperatingSystem)
+        {
+            return @(
+                [Microsoft.Win32.RegistryView]::Registry64,
+                [Microsoft.Win32.RegistryView]::Registry32
+            )
+        }
+
+        return @([Microsoft.Win32.RegistryView]::Default)
+    }
+
+    Enable-Tls12
+    Assert-RunAsAdministrator
+
+    if ($Check -and ($Tag -or $OutDir -or $Keep -or $Force -or $KeepOldVersion -or $Uninstall -or $SkipChecksum))
+    {
+        Write-Error 'The -Check option cannot be combined with install/uninstall options.'
+        exit 1
+    }
+
+    function Test-NetworkConnectivity
+    {
+        # Skip network check in WhatIf mode to allow preview without connectivity
+        if ($WhatIfPreference)
+        {
+            return $true
+        }
+
+        try
+        {
+            $null = Invoke-CompatRestMethod -Parameters @{
+                Uri = 'https://api.github.com'
+                TimeoutSec = 10
+                ErrorAction = 'Stop'
             }
+            return $true
+        }
+        catch
+        {
+            Write-Error -Message 'Cannot reach GitHub API. Check your internet connection.' -ErrorAction Continue
+            return $false
         }
     }
 
-    return $null
-}
-
-function Invoke-GitHubApi
-{
-    param([Parameter(Mandatory = $true)][string]$Url)
-
-    Write-Verbose "Fetching release metadata: $Url"
-    $headers = @{
-        'User-Agent' = 'pwsh-upstall'
-    }
-
-    # Use GitHub token if available (avoids rate limiting in CI environments)
-    if ($env:GITHUB_TOKEN)
+    function Test-DiskSpace
     {
-        $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN"
+        param(
+            [string]$Path,
+            [int]$RequiredMB = 500
+        )
+
+        try
+        {
+            $drive = [System.IO.Path]::GetPathRoot($Path)
+            $driveName = $drive -replace '[:\\]+$', ''
+            $driveInfo = Get-PSDrive -Name $driveName -ErrorAction Stop
+            $availableMB = [math]::Round($driveInfo.Free / 1MB)
+
+            Write-Verbose "Disk space check: ${availableMB}MB available on $drive"
+
+            if ($availableMB -lt $RequiredMB)
+            {
+                Write-Error -Message "Insufficient disk space. Required: ${RequiredMB}MB, Available: ${availableMB}MB" -ErrorAction Continue
+                return $false
+            }
+            return $true
+        }
+        catch
+        {
+            Write-Warning "Could not determine disk space: $_"
+            return $true
+        }
     }
 
-    $params = @{
-        Uri = $Url
-        Headers = $headers
-    }
-
-    Invoke-CompatRestMethod -Parameters $params
-}
-
-function Get-SemVerSelectorParts
-{
-    param([string]$Selector)
-
-    if (-not $Selector)
+    function Compare-SemanticVersion
     {
+        param(
+            [string]$Version1,
+            [string]$Version2
+        )
+
+        try
+        {
+            $v1 = [version](Remove-VersionPrefix -Value $Version1)
+            $v2 = [version](Remove-VersionPrefix -Value $Version2)
+
+            if ($v1 -eq $v2) { return 0 }
+            if ($v1 -lt $v2) { return -1 }
+            return 1
+        }
+        catch
+        {
+            # Fallback to string comparison
+            return [string]::Compare($Version1, $Version2)
+        }
+    }
+
+    function Get-OsArch
+    {
+        $arch = $env:PROCESSOR_ARCHITEW6432
+        if (-not $arch)
+        {
+            $arch = $env:PROCESSOR_ARCHITECTURE
+        }
+
+        switch -Regex ($arch.ToUpperInvariant())
+        {
+            '^(AMD64|X86_64)$' { return 'x64' }
+            '^ARM64$' { return 'arm64' }
+            '^X86$' { throw '32-bit x86 Windows is not supported by PowerShell MSI releases.' }
+            default { throw "Unsupported architecture: $arch" }
+        }
+    }
+
+    function Get-PwshUninstallInfo
+    {
+        $uninstallSubKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+
+        foreach ($view in Get-RegistryViews)
+        {
+            $baseKey = $null
+            $uninstallKey = $null
+
+            try
+            {
+                $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $view)
+                $uninstallKey = $baseKey.OpenSubKey($uninstallSubKey)
+                if ($null -eq $uninstallKey) { continue }
+
+                foreach ($subKeyName in $uninstallKey.GetSubKeyNames())
+                {
+                    $itemKey = $null
+
+                    try
+                    {
+                        $itemKey = $uninstallKey.OpenSubKey($subKeyName)
+                        if ($null -eq $itemKey) { continue }
+
+                        $displayName = $itemKey.GetValue('DisplayName')
+                        $uninstallString = $itemKey.GetValue('UninstallString')
+                        $isSupportedPwshInstall = $displayName -and $displayName -notmatch 'x86' -and (
+                            $displayName -match '^PowerShell 7' -or
+                            ($displayName -match '^PowerShell\b' -and $displayName -match 'x64|arm64|7')
+                        )
+
+                        if ($isSupportedPwshInstall)
+                        {
+                            if ($uninstallString)
+                            {
+                                return [PSCustomObject]@{
+                                    DisplayName = $displayName
+                                    UninstallString = $uninstallString
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        if ($itemKey)
+                        {
+                            $itemKey.Close()
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                Write-Verbose "Failed to inspect uninstall registry view [$view]: $_"
+            }
+            finally
+            {
+                if ($uninstallKey)
+                {
+                    $uninstallKey.Close()
+                }
+
+                if ($baseKey)
+                {
+                    $baseKey.Close()
+                }
+            }
+        }
+
         return $null
     }
 
-    $normalized = Remove-VersionPrefix -Value $Selector.Trim()
-    if ($normalized -notmatch '^\d+(\.\d+){0,2}$')
+    function Invoke-GitHubApi
     {
+        param([Parameter(Mandatory = $true)][string]$Url)
+
+        Write-Verbose "Fetching release metadata: $Url"
+        $headers = @{
+            'User-Agent' = 'pwsh-upstall'
+        }
+
+        # Use GitHub token if available (avoids rate limiting in CI environments)
+        if ($env:GITHUB_TOKEN)
+        {
+            $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN"
+        }
+
+        $params = @{
+            Uri = $Url
+            Headers = $headers
+        }
+
+        Invoke-CompatRestMethod -Parameters $params
+    }
+
+    function Get-SemVerSelectorParts
+    {
+        param([string]$Selector)
+
+        if (-not $Selector)
+        {
+            return $null
+        }
+
+        $normalized = Remove-VersionPrefix -Value $Selector.Trim()
+        if ($normalized -notmatch '^\d+(\.\d+){0,2}$')
+        {
+            return $null
+        }
+
+        return @($normalized.Split('.'))
+    }
+
+    function Get-SemVerRelease
+    {
+        param(
+            [string[]]$SelectorParts,
+            [string]$Arch
+        )
+
+        $suffix = "win-$Arch.msi"
+        $selectorText = $SelectorParts -join '.'
+        $releases = @(Invoke-GitHubApi -Url "$apiBase/releases?per_page=100")
+        $matching = @()
+
+        foreach ($release in $releases)
+        {
+            if ($release.draft -or $release.prerelease)
+            {
+                continue
+            }
+
+            $tag = [string]$release.tag_name
+            $tagMatch = [regex]::Match($tag, '^v?(\d+)\.(\d+)\.(\d+)$')
+            if (-not $tagMatch.Success)
+            {
+                continue
+            }
+
+            $major = [int]$tagMatch.Groups[1].Value
+            $minor = [int]$tagMatch.Groups[2].Value
+            $patch = [int]$tagMatch.Groups[3].Value
+
+            if ($SelectorParts.Count -eq 1)
+            {
+                if ($major -ne [int]$SelectorParts[0]) { continue }
+            }
+            elseif ($SelectorParts.Count -eq 2)
+            {
+                if ($major -ne [int]$SelectorParts[0] -or $minor -ne [int]$SelectorParts[1]) { continue }
+            }
+            else
+            {
+                continue
+            }
+
+            $hasAsset = @($release.assets | Where-Object { $_.browser_download_url -like "*$suffix" }).Count -gt 0
+            if (-not $hasAsset)
+            {
+                continue
+            }
+
+            $matching += [PSCustomObject]@{
+                Release = $release
+                Version = [Version]"$major.$minor.$patch"
+            }
+        }
+
+        if (-not $matching)
+        {
+            throw "Could not find a stable release matching selector [$selectorText] with a $suffix asset."
+        }
+
+        return ($matching | Sort-Object -Property Version -Descending | Select-Object -First 1).Release
+    }
+
+    function Get-Release
+    {
+        param(
+            [string]$TagName,
+            [string]$Arch
+        )
+
+        if (-not $TagName -or $TagName -match '^(?i)latest$')
+        {
+            return Invoke-GitHubApi -Url "$apiBase/releases/latest"
+        }
+
+        $selectorParts = Get-SemVerSelectorParts -Selector $TagName
+        if ($selectorParts -and ($selectorParts.Count -eq 1 -or $selectorParts.Count -eq 2))
+        {
+            Write-Verbose "Resolving semver selector: $TagName"
+            return Get-SemVerRelease -SelectorParts $selectorParts -Arch $Arch
+        }
+
+        if ($selectorParts -and $selectorParts.Count -eq 3)
+        {
+            $normalizedTag = 'v' + ($selectorParts -join '.')
+            return Invoke-GitHubApi -Url "$apiBase/releases/tags/$normalizedTag"
+        }
+
+        return Invoke-GitHubApi -Url "$apiBase/releases/tags/$TagName"
+    }
+
+    function Select-Asset
+    {
+        param(
+            $Release,
+            [string]$Arch
+        )
+
+        $suffix = "win-$Arch.msi"
+        $candidates = @($Release.assets | Where-Object { $_.browser_download_url -like "*$suffix" })
+        if (-not $candidates)
+        {
+            throw "Could not find a $suffix asset in release [$($Release.tag_name)]."
+        }
+
+        $selected = $candidates |
+        Sort-Object -Descending -Property @{
+            Expression = {
+                $w = 0
+                if ($_.name -match 'preview') { $w -= 10 }
+                if ($_.name -match 'rc') { $w -= 5 }
+                if ($_.name -match "^PowerShell-.*-$suffix$") { $w += 5 }
+                $w
+            }
+        } |
+        Select-Object -First 1
+
+        # Find corresponding SHA256 file
+        $shaName = $selected.name + '.sha256'
+        $shaAsset = $Release.assets | Where-Object { $_.name -eq $shaName } | Select-Object -First 1
+        if (-not $shaAsset)
+        {
+            $shaAsset = $Release.assets | Where-Object { $_.name -eq 'hashes.sha256' } | Select-Object -First 1
+        }
+
+        return [PSCustomObject]@{
+            Asset = $selected
+            ShaAsset = $shaAsset
+        }
+    }
+
+    function Get-ExpectedSha256
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$ChecksumPath,
+            [Parameter(Mandatory = $true)]
+            [string]$AssetName
+        )
+
+        $assetLeaf = Split-Path -Path $AssetName -Leaf
+        $lines = @(Get-Content -Path $ChecksumPath | Where-Object { $_.Trim() })
+
+        foreach ($line in $lines)
+        {
+            $parts = $line.Trim() -split '\s+'
+            if ($parts.Count -lt 2)
+            {
+                continue
+            }
+
+            $candidate = $parts[-1].TrimStart('*')
+            $candidateLeaf = Split-Path -Path $candidate -Leaf
+            if ($candidate -ieq $AssetName -or $candidateLeaf -ieq $assetLeaf)
+            {
+                return $parts[0]
+            }
+        }
+
+        if ($lines.Count -gt 0)
+        {
+            return (($lines[0].Trim() -split '\s+')[0])
+        }
+
+        throw "Could not determine expected SHA256 for '$AssetName' from '$ChecksumPath'."
+    }
+
+    function Get-InstalledPwshVersion
+    {
+        try
+        {
+            if (Get-Command pwsh -ErrorAction SilentlyContinue)
+            {
+                return (& pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>$null)
+            }
+        }
+        catch { }
         return $null
     }
 
-    return @($normalized.Split('.'))
-}
-
-function Get-SemVerRelease
-{
-    param(
-        [string[]]$SelectorParts,
-        [string]$Arch
-    )
-
-    $suffix = "win-$Arch.msi"
-    $selectorText = $SelectorParts -join '.'
-    $releases = @(Invoke-GitHubApi -Url "$apiBase/releases?per_page=100")
-    $matching = @()
-
-    foreach ($release in $releases)
+    function Show-RemainingPwshUserDirs
     {
-        if ($release.draft -or $release.prerelease)
+        $userDirs = @()
+        $docsPath = Join-Path -Path $env:USERPROFILE -ChildPath 'Documents\PowerShell'
+        $localPath = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Microsoft\PowerShell'
+        $roamingPath = Join-Path -Path $env:APPDATA -ChildPath 'Microsoft\PowerShell'
+
+        if (Test-Path $docsPath) { $userDirs += $docsPath }
+        if (Test-Path $localPath) { $userDirs += $localPath }
+        if (Test-Path $roamingPath) { $userDirs += $roamingPath }
+
+        if ($userDirs.Count -gt 0)
         {
-            continue
+            Write-Host ''
+            Write-Warn 'Note: The following user-specific directories still exist and may be removed manually:'
+            foreach ($dir in $userDirs)
+            {
+                Write-Warn "  $dir"
+            }
+            Write-Info 'To remove them, run: Remove-Item -Recurse -Force ~\Documents\PowerShell, $env:LOCALAPPDATA\Microsoft\PowerShell, $env:APPDATA\Microsoft\PowerShell'
+        }
+    }
+
+    function Invoke-PwshUninstallCommand
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            $Info,
+            [switch]$SkipUserDirNotice
+        )
+
+        $exe = $Info.UninstallString
+        $uninstallArgs = $null
+        if ($exe -match '^\s*"?([^"\s]+\.exe)"?\s+(.*)$')
+        {
+            $exe = $matches[1]
+            $uninstallArgs = $matches[2]
         }
 
-        $tag = [string]$release.tag_name
-        $tagMatch = [regex]::Match($tag, '^v?(\d+)\.(\d+)\.(\d+)$')
-        if (-not $tagMatch.Success)
+        if ($exe -match 'msiexec' -and $uninstallArgs -notmatch '/q[nrb]?')
         {
-            continue
+            $uninstallArgs += ' /qn /norestart'
         }
 
-        $major = [int]$tagMatch.Groups[1].Value
-        $minor = [int]$tagMatch.Groups[2].Value
-        $patch = [int]$tagMatch.Groups[3].Value
-
-        if ($SelectorParts.Count -eq 1)
+        $proc = Start-Process -FilePath $exe -ArgumentList $uninstallArgs -Wait -PassThru
+        if ($proc.ExitCode -ne 0)
         {
-            if ($major -ne [int]$SelectorParts[0]) { continue }
+            throw "Uninstall failed with exit code: $($proc.ExitCode)"
         }
-        elseif ($SelectorParts.Count -eq 2)
+
+        if (-not $SkipUserDirNotice)
         {
-            if ($major -ne [int]$SelectorParts[0] -or $minor -ne [int]$SelectorParts[1]) { continue }
+            Show-RemainingPwshUserDirs
+        }
+    }
+
+    $arch = Get-OsArch
+    Write-Verbose "Detected architecture: $arch"
+
+    if ($Check)
+    {
+        Write-Info 'Checking network connectivity...'
+        if (-not (Test-NetworkConnectivity))
+        {
+            exit 1
+        }
+
+        $release = Get-Release -TagName $null -Arch $arch
+        $null = Select-Asset -Release $release -Arch $arch
+
+        $releaseTag = $release.tag_name
+        $latestVersion = Remove-VersionPrefix -Value $releaseTag
+
+        if (-not $latestVersion)
+        {
+            Write-Error 'Could not determine latest PowerShell release tag.'
+            exit 1
+        }
+
+        $installed = Get-InstalledPwshVersion
+        if (-not $installed)
+        {
+            Write-Warn "PowerShell is not installed. Latest available: $latestVersion"
+            exit 2
+        }
+
+        $cmp = Compare-SemanticVersion -Version1 $installed -Version2 $latestVersion
+        if ($cmp -eq 0)
+        {
+            Write-Success "PowerShell $installed is up to date (latest: $latestVersion)."
+            exit 0
+        }
+        elseif ($cmp -lt 0)
+        {
+            Write-Warn "Update available: installed $installed -> latest $latestVersion."
+            exit 1
         }
         else
         {
-            continue
+            Write-Warn "Installed version $installed is newer than latest release $latestVersion."
+            exit 0
         }
+    }
 
-        $hasAsset = @($release.assets | Where-Object { $_.browser_download_url -like "*$suffix" }).Count -gt 0
-        if (-not $hasAsset)
+    # Warn if running from pwsh (PowerShell Core) when trying to upgrade
+    if (-not $Uninstall)
+    {
+        $currentShell = (Get-Process -Id $PID).ProcessName
+        if ($currentShell -eq 'pwsh')
         {
-            continue
+            $installedVersion = Get-InstalledPwshVersion
+            if ($installedVersion)
+            {
+                Write-Warning 'You are running this script from PowerShell Core (pwsh.exe).'
+                Write-Warning "The MSI installer may fail with 'process in use' errors when upgrading."
+                Write-Warning 'For best results, run this script from Windows PowerShell (powershell.exe):'
+                Write-Warning '  powershell -File .\pwsh-upstall-windows.ps1'
+                Write-Host ''
+                Start-Sleep -Seconds 3
+            }
         }
-
-        $matching += [PSCustomObject]@{
-            Release = $release
-            Version = [Version]"$major.$minor.$patch"
-        }
     }
 
-    if (-not $matching)
+    if ($Uninstall)
     {
-        throw "Could not find a stable release matching selector [$selectorText] with a $suffix asset."
-    }
-
-    return ($matching | Sort-Object -Property Version -Descending | Select-Object -First 1).Release
-}
-
-function Get-Release
-{
-    param(
-        [string]$TagName,
-        [string]$Arch
-    )
-
-    if (-not $TagName -or $TagName -match '^(?i)latest$')
-    {
-        return Invoke-GitHubApi -Url "$apiBase/releases/latest"
-    }
-
-    $selectorParts = Get-SemVerSelectorParts -Selector $TagName
-    if ($selectorParts -and ($selectorParts.Count -eq 1 -or $selectorParts.Count -eq 2))
-    {
-        Write-Verbose "Resolving semver selector: $TagName"
-        return Get-SemVerRelease -SelectorParts $selectorParts -Arch $Arch
-    }
-
-    if ($selectorParts -and $selectorParts.Count -eq 3)
-    {
-        $normalizedTag = 'v' + ($selectorParts -join '.')
-        return Invoke-GitHubApi -Url "$apiBase/releases/tags/$normalizedTag"
-    }
-
-    return Invoke-GitHubApi -Url "$apiBase/releases/tags/$TagName"
-}
-
-function Select-Asset
-{
-    param(
-        $Release,
-        [string]$Arch
-    )
-
-    $suffix = "win-$Arch.msi"
-    $candidates = @($Release.assets | Where-Object { $_.browser_download_url -like "*$suffix" })
-    if (-not $candidates)
-    {
-        throw "Could not find a $suffix asset in release [$($Release.tag_name)]."
-    }
-
-    $selected = $candidates |
-    Sort-Object -Descending -Property @{
-        Expression = {
-            $w = 0
-            if ($_.name -match 'preview') { $w -= 10 }
-            if ($_.name -match 'rc') { $w -= 5 }
-            if ($_.name -match "^PowerShell-.*-$suffix$") { $w += 5 }
-            $w
-        }
-    } |
-    Select-Object -First 1
-
-    # Find corresponding SHA256 file
-    $shaName = $selected.name + '.sha256'
-    $shaAsset = $Release.assets | Where-Object { $_.name -eq $shaName } | Select-Object -First 1
-    if (-not $shaAsset)
-    {
-        $shaAsset = $Release.assets | Where-Object { $_.name -eq 'hashes.sha256' } | Select-Object -First 1
-    }
-
-    return [PSCustomObject]@{
-        Asset = $selected
-        ShaAsset = $shaAsset
-    }
-}
-
-function Get-ExpectedSha256
-{
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ChecksumPath,
-        [Parameter(Mandatory = $true)]
-        [string]$AssetName
-    )
-
-    $assetLeaf = Split-Path -Path $AssetName -Leaf
-    $lines = @(Get-Content -Path $ChecksumPath | Where-Object { $_.Trim() })
-
-    foreach ($line in $lines)
-    {
-        $parts = $line.Trim() -split '\s+'
-        if ($parts.Count -lt 2)
+        $info = Get-PwshUninstallInfo
+        if (-not $info -or -not $info.DisplayName -or -not $info.UninstallString)
         {
-            continue
+            Write-Warn 'No PowerShell install found via MSI uninstall entries.'
+            return
         }
-
-        $candidate = $parts[-1].TrimStart('*')
-        $candidateLeaf = Split-Path -Path $candidate -Leaf
-        if ($candidate -ieq $AssetName -or $candidateLeaf -ieq $assetLeaf)
+        Write-Info "Found PowerShell install: $($info.DisplayName)"
+        if ($PSCmdlet.ShouldProcess($info.DisplayName, "Uninstall via $($info.UninstallString)"))
         {
-            return $parts[0]
+            try
+            {
+                Invoke-PwshUninstallCommand -Info $info
+            }
+            catch
+            {
+                Write-Error $_
+                exit 1
+            }
         }
+        return
     }
 
-    if ($lines.Count -gt 0)
-    {
-        return (($lines[0].Trim() -split '\s+')[0])
-    }
-
-    throw "Could not determine expected SHA256 for '$AssetName' from '$ChecksumPath'."
-}
-
-function Get-InstalledPwshVersion
-{
-    try
-    {
-        if (Get-Command pwsh -ErrorAction SilentlyContinue)
-        {
-            return (& pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>$null)
-        }
-    }
-    catch { }
-    return $null
-}
-
-function Show-RemainingPwshUserDirs
-{
-    $userDirs = @()
-    $docsPath = Join-Path -Path $env:USERPROFILE -ChildPath 'Documents\PowerShell'
-    $localPath = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Microsoft\PowerShell'
-    $roamingPath = Join-Path -Path $env:APPDATA -ChildPath 'Microsoft\PowerShell'
-
-    if (Test-Path $docsPath) { $userDirs += $docsPath }
-    if (Test-Path $localPath) { $userDirs += $localPath }
-    if (Test-Path $roamingPath) { $userDirs += $roamingPath }
-
-    if ($userDirs.Count -gt 0)
-    {
-        Write-Host ''
-        Write-Warn 'Note: The following user-specific directories still exist and may be removed manually:'
-        foreach ($dir in $userDirs)
-        {
-            Write-Warn "  $dir"
-        }
-        Write-Info 'To remove them, run: Remove-Item -Recurse -Force ~\Documents\PowerShell, $env:LOCALAPPDATA\Microsoft\PowerShell, $env:APPDATA\Microsoft\PowerShell'
-    }
-}
-
-function Invoke-PwshUninstallCommand
-{
-    param(
-        [Parameter(Mandatory = $true)]
-        $Info,
-        [switch]$SkipUserDirNotice
-    )
-
-    $exe = $Info.UninstallString
-    $uninstallArgs = $null
-    if ($exe -match '^\s*"?([^"\s]+\.exe)"?\s+(.*)$')
-    {
-        $exe = $matches[1]
-        $uninstallArgs = $matches[2]
-    }
-
-    if ($exe -match 'msiexec' -and $uninstallArgs -notmatch '/q[nrb]?')
-    {
-        $uninstallArgs += ' /qn /norestart'
-    }
-
-    $proc = Start-Process -FilePath $exe -ArgumentList $uninstallArgs -Wait -PassThru
-    if ($proc.ExitCode -ne 0)
-    {
-        throw "Uninstall failed with exit code: $($proc.ExitCode)"
-    }
-
-    if (-not $SkipUserDirNotice)
-    {
-        Show-RemainingPwshUserDirs
-    }
-}
-
-$arch = Get-OsArch
-Write-Verbose "Detected architecture: $arch"
-
-if ($Check)
-{
     Write-Info 'Checking network connectivity...'
     if (-not (Test-NetworkConnectivity))
     {
         exit 1
     }
 
-    $release = Get-Release -TagName $null -Arch $arch
-    $null = Select-Asset -Release $release -Arch $arch
-
+    $release = Get-Release -TagName $Tag -Arch $arch
+    $assetInfo = Select-Asset -Release $release -Arch $arch
+    $asset = $assetInfo.Asset
+    $shaAsset = $assetInfo.ShaAsset
     $releaseTag = $release.tag_name
-    $latestVersion = Remove-VersionPrefix -Value $releaseTag
+    $targetVersion = Remove-VersionPrefix -Value $releaseTag
 
-    if (-not $latestVersion)
-    {
-        Write-Error 'Could not determine latest PowerShell release tag.'
-        exit 1
-    }
+    Write-Info "Selected PowerShell release: $releaseTag"
+    Write-Info "Selected installer: $($asset.name)"
+    Write-Info "Download URL: $($asset.browser_download_url)"
 
     $installed = Get-InstalledPwshVersion
-    if (-not $installed)
+    $versionComparison = $null
+    $upgradeFromVersion = $null
+    $upgradeUninstallInfo = $null
+
+    if ($installed -and $targetVersion)
     {
-        Write-Warn "PowerShell is not installed. Latest available: $latestVersion"
-        exit 2
+        $versionComparison = Compare-SemanticVersion -Version1 $installed -Version2 $targetVersion
+        if ($versionComparison -lt 0)
+        {
+            $upgradeFromVersion = $installed
+            if (-not $KeepOldVersion)
+            {
+                $upgradeUninstallInfo = Get-PwshUninstallInfo
+            }
+        }
     }
 
-    $cmp = Compare-SemanticVersion -Version1 $installed -Version2 $latestVersion
-    if ($cmp -eq 0)
+    if (-not $Force)
     {
-        Write-Success "PowerShell $installed is up to date (latest: $latestVersion)."
-        exit 0
+        if ($installed -and $targetVersion -and $versionComparison -eq 0)
+        {
+            Write-Warn "PowerShell $installed is already installed; use -Force to reinstall."
+            return
+        }
     }
-    elseif ($cmp -lt 0)
+
+    $dlDir = if ($OutDir)
     {
-        Write-Warn "Update available: installed $installed -> latest $latestVersion."
+        $OutDir
+    }
+    else
+    {
+        Join-Path -Path $env:TEMP -ChildPath ('pwsh-upstall-' + [guid]::NewGuid())
+    }
+
+    if ($WhatIfPreference)
+    {
+        Write-Info 'Dry-run summary:'
+        Write-Host "  Would create  : $dlDir"
+        Write-Host "  Would download: $($asset.browser_download_url)"
+        Write-Host "  Would install : $($asset.name)"
+        if ($SkipChecksum)
+        {
+            Write-Host '  Would verify  : skip SHA256 checksum verification'
+        }
+        else
+        {
+            Write-Host '  Would verify  : SHA256 checksum'
+        }
+        Write-Host '  Would run     : msiexec.exe /i <downloaded-msi> /qn /norestart'
+        if ($upgradeFromVersion)
+        {
+            if ($KeepOldVersion)
+            {
+                Write-Host "  Would keep    : previous version $upgradeFromVersion"
+            }
+            elseif ($upgradeUninstallInfo)
+            {
+                Write-Host "  Would remove  : previous version $upgradeFromVersion before install"
+            }
+            else
+            {
+                Write-Host "  Would attempt : to remove previous version $upgradeFromVersion before install (no MSI uninstall entry found yet)"
+            }
+        }
+        return
+    }
+
+    if (-not (Test-DiskSpace -Path $env:ProgramFiles -RequiredMB 500))
+    {
         exit 1
     }
-    else
-    {
-        Write-Warn "Installed version $installed is newer than latest release $latestVersion."
-        exit 0
-    }
-}
 
-# Warn if running from pwsh (PowerShell Core) when trying to upgrade
-if (-not $Uninstall)
-{
-    $currentShell = (Get-Process -Id $PID).ProcessName
-    if ($currentShell -eq 'pwsh')
+    if (-not $PSCmdlet.ShouldProcess($dlDir, 'Create download directory'))
     {
-        $installedVersion = Get-InstalledPwshVersion
-        if ($installedVersion)
-        {
-            Write-Warning 'You are running this script from PowerShell Core (pwsh.exe).'
-            Write-Warning "The MSI installer may fail with 'process in use' errors when upgrading."
-            Write-Warning 'For best results, run this script from Windows PowerShell (powershell.exe):'
-            Write-Warning '  powershell -File .\pwsh-upstall-windows.ps1'
-            Write-Host ''
-            Start-Sleep -Seconds 3
-        }
-    }
-}
-
-if ($Uninstall)
-{
-    $info = Get-PwshUninstallInfo
-    if (-not $info -or -not $info.DisplayName -or -not $info.UninstallString)
-    {
-        Write-Warn 'No PowerShell install found via MSI uninstall entries.'
         return
     }
-    Write-Info "Found PowerShell install: $($info.DisplayName)"
-    if ($PSCmdlet.ShouldProcess($info.DisplayName, "Uninstall via $($info.UninstallString)"))
+
+    New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
+
+    try
     {
-        try
+        if ($upgradeFromVersion)
         {
-            Invoke-PwshUninstallCommand -Info $info
-        }
-        catch
-        {
-            Write-Error $_
-            exit 1
-        }
-    }
-    return
-}
-
-Write-Info 'Checking network connectivity...'
-if (-not (Test-NetworkConnectivity))
-{
-    exit 1
-}
-
-$release = Get-Release -TagName $Tag -Arch $arch
-$assetInfo = Select-Asset -Release $release -Arch $arch
-$asset = $assetInfo.Asset
-$shaAsset = $assetInfo.ShaAsset
-$releaseTag = $release.tag_name
-$targetVersion = Remove-VersionPrefix -Value $releaseTag
-
-Write-Info "Selected PowerShell release: $releaseTag"
-Write-Info "Selected installer: $($asset.name)"
-Write-Info "Download URL: $($asset.browser_download_url)"
-
-$installed = Get-InstalledPwshVersion
-$versionComparison = $null
-$upgradeFromVersion = $null
-$upgradeUninstallInfo = $null
-
-if ($installed -and $targetVersion)
-{
-    $versionComparison = Compare-SemanticVersion -Version1 $installed -Version2 $targetVersion
-    if ($versionComparison -lt 0)
-    {
-        $upgradeFromVersion = $installed
-        if (-not $KeepOldVersion)
-        {
-            $upgradeUninstallInfo = Get-PwshUninstallInfo
-        }
-    }
-}
-
-if (-not $Force)
-{
-    if ($installed -and $targetVersion -and $versionComparison -eq 0)
-    {
-        Write-Warn "PowerShell $installed is already installed; use -Force to reinstall."
-        return
-    }
-}
-
-$dlDir = if ($OutDir)
-{
-    $OutDir
-}
-else
-{
-    Join-Path -Path $env:TEMP -ChildPath ('pwsh-upstall-' + [guid]::NewGuid())
-}
-
-if ($WhatIfPreference)
-{
-    Write-Info 'Dry-run summary:'
-    Write-Host "  Would create  : $dlDir"
-    Write-Host "  Would download: $($asset.browser_download_url)"
-    Write-Host "  Would install : $($asset.name)"
-    if ($SkipChecksum)
-    {
-        Write-Host '  Would verify  : skip SHA256 checksum verification'
-    }
-    else
-    {
-        Write-Host '  Would verify  : SHA256 checksum'
-    }
-    Write-Host '  Would run     : msiexec.exe /i <downloaded-msi> /qn /norestart'
-    if ($upgradeFromVersion)
-    {
-        if ($KeepOldVersion)
-        {
-            Write-Host "  Would keep    : previous version $upgradeFromVersion"
-        }
-        elseif ($upgradeUninstallInfo)
-        {
-            Write-Host "  Would remove  : previous version $upgradeFromVersion before install"
-        }
-        else
-        {
-            Write-Host "  Would attempt : to remove previous version $upgradeFromVersion before install (no MSI uninstall entry found yet)"
-        }
-    }
-    return
-}
-
-if (-not (Test-DiskSpace -Path $env:ProgramFiles -RequiredMB 500))
-{
-    exit 1
-}
-
-if (-not $PSCmdlet.ShouldProcess($dlDir, 'Create download directory'))
-{
-    return
-}
-
-New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
-
-try
-{
-    if ($upgradeFromVersion)
-    {
-        if ($KeepOldVersion)
-        {
-            Write-Info "Keeping previous PowerShell version $upgradeFromVersion during upgrade (-KeepOldVersion)."
-        }
-        elseif ($upgradeUninstallInfo)
-        {
-            Write-Info "Removing previous PowerShell version $upgradeFromVersion before upgrade..."
-            if ($PSCmdlet.ShouldProcess($upgradeUninstallInfo.DisplayName, "Remove older version $upgradeFromVersion before installing $targetVersion"))
+            if ($KeepOldVersion)
             {
-                Invoke-PwshUninstallCommand -Info $upgradeUninstallInfo -SkipUserDirNotice
+                Write-Info "Keeping previous PowerShell version $upgradeFromVersion during upgrade (-KeepOldVersion)."
+            }
+            elseif ($upgradeUninstallInfo)
+            {
+                Write-Info "Removing previous PowerShell version $upgradeFromVersion before upgrade..."
+                if ($PSCmdlet.ShouldProcess($upgradeUninstallInfo.DisplayName, "Remove older version $upgradeFromVersion before installing $targetVersion"))
+                {
+                    Invoke-PwshUninstallCommand -Info $upgradeUninstallInfo -SkipUserDirNotice
+                }
+            }
+            else
+            {
+                Write-Warn "Upgrade detected from $upgradeFromVersion to $targetVersion, but no MSI uninstall entry was found; proceeding without explicit removal."
             }
         }
-        else
+
+        $installerPath = Join-Path -Path $dlDir -ChildPath $asset.name
+
+        if (Test-Path $installerPath)
         {
-            Write-Warn "Upgrade detected from $upgradeFromVersion to $targetVersion, but no MSI uninstall entry was found; proceeding without explicit removal."
+            Write-Verbose "Removing existing incomplete download: $installerPath"
+            Remove-Item -Force $installerPath
         }
-    }
 
-    $installerPath = Join-Path -Path $dlDir -ChildPath $asset.name
-
-    if (Test-Path $installerPath)
-    {
-        Write-Verbose "Removing existing incomplete download: $installerPath"
-        Remove-Item -Force $installerPath
-    }
-
-    if ($PSCmdlet.ShouldProcess($installerPath, 'Download installer'))
-    {
-        Invoke-CompatWebRequest -Parameters @{
-            Uri = $asset.browser_download_url
-            OutFile = $installerPath
-        }
-    }
-
-    # Verify SHA256 checksum
-    if (-not $SkipChecksum -and $shaAsset)
-    {
-        $shaPath = "$installerPath.sha256"
-        Write-Info 'Downloading checksum file...'
-        if ($PSCmdlet.ShouldProcess($shaPath, 'Download SHA256 checksum'))
+        if ($PSCmdlet.ShouldProcess($installerPath, 'Download installer'))
         {
             Invoke-CompatWebRequest -Parameters @{
-                Uri = $shaAsset.browser_download_url
-                OutFile = $shaPath
+                Uri = $asset.browser_download_url
+                OutFile = $installerPath
             }
         }
 
-        Write-Info 'Verifying SHA256 checksum...'
-        $expectedSha = (Get-ExpectedSha256 -ChecksumPath $shaPath -AssetName $asset.name).ToUpperInvariant()
-        $actualSha = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToUpperInvariant()
-
-        if ($expectedSha -ne $actualSha)
+        # Verify SHA256 checksum
+        if (-not $SkipChecksum -and $shaAsset)
         {
-            Write-Error 'SHA256 checksum verification failed!'
-            Write-Error "  Expected: $expectedSha"
-            Write-Error "  Got:      $actualSha"
-            exit 1
+            $shaPath = "$installerPath.sha256"
+            Write-Info 'Downloading checksum file...'
+            if ($PSCmdlet.ShouldProcess($shaPath, 'Download SHA256 checksum'))
+            {
+                Invoke-CompatWebRequest -Parameters @{
+                    Uri = $shaAsset.browser_download_url
+                    OutFile = $shaPath
+                }
+            }
+
+            Write-Info 'Verifying SHA256 checksum...'
+            $expectedSha = (Get-ExpectedSha256 -ChecksumPath $shaPath -AssetName $asset.name).ToUpperInvariant()
+            $actualSha = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToUpperInvariant()
+
+            if ($expectedSha -ne $actualSha)
+            {
+                Write-Error 'SHA256 checksum verification failed!'
+                Write-Error "  Expected: $expectedSha"
+                Write-Error "  Got:      $actualSha"
+                exit 1
+            }
+            Write-Success 'SHA256 checksum verified successfully'
+            Remove-Item -Force $shaPath
         }
-        Write-Success 'SHA256 checksum verified successfully'
-        Remove-Item -Force $shaPath
-    }
-    elseif (-not $SkipChecksum)
-    {
-        Write-Warning 'SHA256 file not found, skipping checksum verification'
-    }
-
-    $msiArgs = "/i `"$installerPath`" /qn /norestart"
-
-    if ($PSCmdlet.ShouldProcess("msiexec.exe $msiArgs", "Install/upgrade PowerShell $targetVersion"))
-    {
-        $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru
-        if ($proc.ExitCode -ne 0)
+        elseif (-not $SkipChecksum)
         {
-            Write-Error "MSI installation failed with exit code: $($proc.ExitCode)"
-            exit $proc.ExitCode
+            Write-Warning 'SHA256 file not found, skipping checksum verification'
         }
-        Write-Success "PowerShell $targetVersion installed successfully"
+
+        $msiArgs = "/i `"$installerPath`" /qn /norestart"
+
+        if ($PSCmdlet.ShouldProcess("msiexec.exe $msiArgs", "Install/upgrade PowerShell $targetVersion"))
+        {
+            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru
+            if ($proc.ExitCode -ne 0)
+            {
+                Write-Error "MSI installation failed with exit code: $($proc.ExitCode)"
+                exit $proc.ExitCode
+            }
+            Write-Success "PowerShell $targetVersion installed successfully"
+        }
     }
+    finally
+    {
+        if (-not $Keep -and -not $OutDir)
+        {
+            if ($PSCmdlet.ShouldProcess($dlDir, 'Clean up downloaded installer'))
+            {
+                Remove-Item -Recurse -Force $dlDir -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Write-Success 'Done. Verify with: pwsh -v'
 }
-finally
+
+# Keep the entry point outside the script body so stdin launchers still get
+# an advanced function context for ShouldProcess, while dot-sourcing stays safe.
+if ($MyInvocation.InvocationName -ne '.' -and $MyInvocation.Line -notmatch '^\s*\.\s+')
 {
-    if (-not $Keep -and -not $OutDir)
-    {
-        if ($PSCmdlet.ShouldProcess($dlDir, 'Clean up downloaded installer'))
-        {
-            Remove-Item -Recurse -Force $dlDir -ErrorAction SilentlyContinue
-        }
-    }
+    Invoke-PwshUpstallWindows @args
 }
-
-Write-Success 'Done. Verify with: pwsh -v'
