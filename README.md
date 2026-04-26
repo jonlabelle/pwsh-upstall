@@ -21,8 +21,8 @@ Install, update, check, or uninstall PowerShell Core on Windows, macOS, and Linu
   - [macOS](#macos)
   - [Linux](#linux)
 - [Common Actions](#common-actions)
-- [Select a Version](#select-a-version)
 - [Options](#options)
+- [Select a Version](#select-a-version)
 - [Run with Options](#run-with-options)
   - [macOS/Linux](#macoslinux)
   - [Windows](#windows-1)
@@ -36,7 +36,7 @@ Install, update, check, or uninstall PowerShell Core on Windows, macOS, and Linu
 
 These one-liners install or update to the latest stable release.
 
-> You'll need to download the script first if you need options like `--tag`, `--check`, or `-WhatIf`.
+> You'll need to [download the script](#download-the-archive) first if you need [options](#options) like `--tag`, `--check`, or `-WhatIf`.
 
 ### Windows
 
@@ -71,6 +71,24 @@ curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/
 | Check if up to date (no install) | `bash ./pwsh-upstall-macos.sh --check`     | `sh ./pwsh-upstall-linux.sh --check`     | `powershell -File .\pwsh-upstall-windows.ps1 -Check`     |
 | Uninstall                        | `bash ./pwsh-upstall-macos.sh --uninstall` | `sh ./pwsh-upstall-linux.sh --uninstall` | `powershell -File .\pwsh-upstall-windows.ps1 -Uninstall` |
 
+## Options
+
+| Purpose                             | macOS/Linux          | Windows                               |
+| ----------------------------------- | -------------------- | ------------------------------------- |
+| Select version                      | `--tag <tag>`        | `-Tag <tag>`                          |
+| Save downloaded package/installer   | `--out-dir <dir>`    | `-OutDir <path>`                      |
+| Keep downloaded package/installer   | `--keep`             | `-Keep`                               |
+| Reinstall even if already installed | `--force`            | `-Force`                              |
+| Keep old version during upgrade     | `--keep-old-version` | `-KeepOldVersion`                     |
+| Check only (no install)             | `--check`            | `-Check`                              |
+| Uninstall                           | `--uninstall`        | `-Uninstall`                          |
+| Skip SHA256 verification            | `--skip-checksum`    | `-SkipChecksum`                       |
+| Dry run                             | `-n, --dry-run`      | `-WhatIf`                             |
+| Help                                | `-h, --help`         | `Get-Help .\pwsh-upstall-windows.ps1` |
+
+> [!Note]
+> Windows automatically detects x64/arm64 architecture, requires Administrator privileges, and installs to `Program Files\PowerShell\7`.
+
 ## Select a Version
 
 Use semver selectors to choose a release:
@@ -94,24 +112,6 @@ powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.6.4
 
 > [!Note]
 > Prereleases require an exact tag, for example `v7.6.0-preview.1`. Default/latest/major/minor selection is stable-only.
-
-## Options
-
-| Purpose                             | macOS/Linux          | Windows                                     |
-| ----------------------------------- | -------------------- | ------------------------------------------- |
-| Select version                      | `--tag <tag>`        | `-Tag <tag>`                                |
-| Save downloaded package/installer   | `--out-dir <dir>`    | `-OutDir <path>`                            |
-| Keep downloaded package/installer   | `--keep`             | `-Keep`                                     |
-| Reinstall even if already installed | `--force`            | `-Force`                                    |
-| Keep old version during upgrade     | `--keep-old-version` | `-KeepOldVersion`                           |
-| Check only (no install)             | `--check`            | `-Check`                                    |
-| Uninstall                           | `--uninstall`        | `-Uninstall`                                |
-| Skip SHA256 verification            | `--skip-checksum`    | `-SkipChecksum`                             |
-| Dry run                             | `-n, --dry-run`      | `-WhatIf`                                   |
-| Help                                | `-h, --help`         | `Get-Help .\pwsh-upstall-windows.ps1 -Full` |
-
-> [!Note]
-> Windows automatically detects x64/arm64 architecture, requires Administrator privileges, and installs to `Program Files\PowerShell\7`.
 
 ## Run with Options
 
