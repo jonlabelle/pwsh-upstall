@@ -111,6 +111,7 @@
 
         Author: Jon LaBelle
         Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-windows.ps1
+        License: MIT
 
     .LINK
         https://github.com/PowerShell/PowerShell/releases

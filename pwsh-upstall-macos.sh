@@ -74,6 +74,7 @@ set -euo pipefail
 #
 # Author: Jon LaBelle
 # Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-macos.sh
+# License: MIT
 
 API_BASE="https://api.github.com/repos/PowerShell/PowerShell"
 

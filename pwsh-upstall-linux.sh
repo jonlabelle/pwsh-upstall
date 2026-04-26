@@ -72,6 +72,7 @@ set -eu
 #
 # Author: Jon LaBelle
 # Source: https://github.com/jonlabelle/pwsh-upstall/blob/main/pwsh-upstall-linux.sh
+# License: MIT
 
 API_BASE="https://api.github.com/repos/PowerShell/PowerShell"
 
