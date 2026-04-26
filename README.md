@@ -10,7 +10,7 @@ Install, update, check, or uninstall PowerShell Core on Windows, macOS, and Linu
 | macOS    | [`pwsh-upstall-macos.sh`](./pwsh-upstall-macos.sh)       | Apple Silicon and Intel        |
 | Linux    | [`pwsh-upstall-linux.sh`](./pwsh-upstall-linux.sh)       | x64/arm64, glibc/musl (Alpine) |
 
-> Upgrades remove the previously active version by default. Use `--keep-old-version` or `-KeepOldVersion` to keep it.
+> Upgrades remove the previously installed version by default. Use `--keep-old-version` or `-KeepOldVersion` to keep it.
 
 ![Checks if PowerShell is up to date](screenshot.png "Checks if PowerShell is up to date")
 
@@ -41,7 +41,7 @@ These one-liners install or update to the latest stable release.
 ### Windows
 
 > [!Important]
-> Requires Administrator privileges. Run from an [elevated Windows PowerShell prompt](https://learn.microsoft.com/powershell/scripting/windows-powershell/starting-windows-powershell#run-with-administrative-privileges), not PowerShell Core (`pwsh.exe`), to avoid process-in-use errors.
+> Requires Administrator privileges. Use an [elevated Windows PowerShell (`powershell.exe`) prompt](https://learn.microsoft.com/powershell/scripting/windows-powershell/starting-windows-powershell#run-with-administrative-privileges), not PowerShell Core (`pwsh.exe`), to avoid process-in-use errors.
 
 ```powershell
 irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-windows.ps1' |
@@ -113,8 +113,8 @@ Use semver selectors to choose a release:
 
 ```text
 v7      -> latest 7.x release
-v7.6    -> latest 7.5.x release
-v7.6.4  -> specific patch release
+v7.6    -> latest 7.6.x release
+v7.6.1  -> specific patch release
 ```
 
 Examples:
@@ -125,11 +125,11 @@ sh ./pwsh-upstall-linux.sh --tag v7.6
 ```
 
 ```powershell
-powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.6.4
+powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.6.1
 ```
 
 > [!Note]
-> Prereleases require an exact tag, for example `v7.6.0-preview.1`. Default/latest/major/minor selection is stable-only.
+> Prereleases require an exact tag, for example `v7.6.0-preview.1`. Default, latest, major, and minor version selectors resolve to stable releases only.
 
 ## Run with Options
 
