@@ -4,9 +4,11 @@
 
 Platform-specific scripts to install/update PowerShell Core from GitHub releases with SHA256 verification, including shared `hashes.sha256` manifests.
 
-- **macOS**: `pwsh-upstall-macos.sh` — Apple Silicon & Intel
-- **Linux**: `pwsh-upstall-linux.sh` — x64/arm64, glibc/musl (Alpine)
-- **Windows**: `pwsh-upstall-windows.ps1` — x64/arm64
+| Platform | Script                                                   | Architecture                   |
+| -------- | -------------------------------------------------------- | ------------------------------ |
+| Windows  | [`pwsh-upstall-windows.ps1`](./pwsh-upstall-windows.ps1) | x64/arm64                      |
+| macOS    | [`pwsh-upstall-macos.sh`](./pwsh-upstall-macos.sh)       | Apple Silicon and Intel        |
+| Linux    | [`pwsh-upstall-linux.sh`](./pwsh-upstall-linux.sh)       | x64/arm64, glibc/musl (Alpine) |
 
 Upgrades remove the previously active version by default. Use `--keep-old-version` or `-KeepOldVersion` to opt out.
 
@@ -17,7 +19,9 @@ Upgrades remove the previously active version by default. Use `--keep-old-versio
 - [Install](#install)
   - [One-liners](#one-liners)
   - [Other options](#other-options)
-- [Run locally](#run-locally)
+  - [Common actions](#common-actions)
+  - [Set the version to install](#set-the-version-to-install)
+  - [Option mapping](#option-mapping)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
@@ -25,17 +29,7 @@ Upgrades remove the previously active version by default. Use `--keep-old-versio
 
 ### One-liners
 
-#### macOS
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-macos.sh | bash
-```
-
-#### Linux
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-linux.sh | sh
-```
+These commands download and run the appropriate script for your platform in a single step. If you need to specify options like `--tag`, `--check`, or `-WhatIf`, use the [Other options](#other-options) methods instead.
 
 #### Windows
 
@@ -50,6 +44,18 @@ irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/p
 > [!Note]
 > Run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`), to avoid process-in-use errors.
 > If you need `-Tag`, `-Check`, `-WhatIf`, or other script parameters, use `powershell -File .\pwsh-upstall-windows.ps1 ...` instead; `powershell.exe -` does not pass script arguments through stdin mode.
+
+#### macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-macos.sh | bash
+```
+
+#### Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-linux.sh | sh
+```
 
 ---
 
@@ -104,7 +110,7 @@ powershell -File .\pwsh-upstall-windows.ps1
 | Check if up to date (no install) | `./pwsh-upstall-macos.sh --check`     | `./pwsh-upstall-linux.sh --check`     | `powershell -File .\pwsh-upstall-windows.ps1 -Check`     |
 | Uninstall                        | `./pwsh-upstall-macos.sh --uninstall` | `./pwsh-upstall-linux.sh --uninstall` | `powershell -File .\pwsh-upstall-windows.ps1 -Uninstall` |
 
-### Select a version (`--tag` / `-Tag`)
+### Set the version to install
 
 Use semver selectors to choose a release:
 
