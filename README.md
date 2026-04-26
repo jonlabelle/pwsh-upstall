@@ -55,7 +55,7 @@ irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/p
 
 ### Other options
 
-#### Clone the repo
+#### Option 1: Clone the repo with Git
 
 ```bash
 git clone https://github.com/jonlabelle/pwsh-upstall.git
@@ -63,42 +63,38 @@ cd pwsh-upstall
 
 # macOS
 bash pwsh-upstall-macos.sh
+
 # Linux
-bash pwsh-upstall-linux.sh
+sh pwsh-upstall-linux.sh
+
 # Windows (from PowerShell, requires Admin privileges)
 powershell -File .\pwsh-upstall-windows.ps1
 ```
 
-#### Download the archive (macOS/Linux)
+#### Option 2a: Download the archive (macOS/Linux)
 
 ```bash
 curl -L -o pwsh-upstall.zip https://github.com/jonlabelle/pwsh-upstall/archive/refs/heads/main.zip
 unzip pwsh-upstall.zip
 cd pwsh-upstall-main
+
+# macOS
 bash pwsh-upstall-macos.sh
+
+# Linux
+sh pwsh-upstall-linux.sh
 ```
 
-#### Download the archive (Windows)
+#### Option 2b: Download the archive (Windows)
 
 ```powershell
 Invoke-WebRequest -Uri https://github.com/jonlabelle/pwsh-upstall/archive/refs/heads/main.zip -OutFile pwsh-upstall.zip
 Expand-Archive -Path pwsh-upstall.zip -DestinationPath .
 Set-Location .\pwsh-upstall-main
+
+# Windows (requires Admin privileges)
 powershell -File .\pwsh-upstall-windows.ps1
 ```
-
-## Run locally
-
-Use the command for your platform:
-
-| Platform | Command                                       |
-| -------- | --------------------------------------------- |
-| macOS    | `./pwsh-upstall-macos.sh`                     |
-| Linux    | `./pwsh-upstall-linux.sh`                     |
-| Windows  | `powershell -File .\pwsh-upstall-windows.ps1` |
-
-> [!Note]
-> On Windows, run from Windows PowerShell (`powershell.exe`), not PowerShell Core (`pwsh.exe`).
 
 ### Common actions
 
