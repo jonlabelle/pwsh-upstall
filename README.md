@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/jonlabelle/pwsh-upstall/actions/workflows/ci.yml/badge.svg)](https://github.com/jonlabelle/pwsh-upstall/actions/workflows/ci.yml)
 
-Install, update, check, or uninstall PowerShell 7+ on Windows, macOS, and Linux from official GitHub releases with SHA256 verification.
+Install, update, check, or uninstall PowerShell Core on Windows, macOS, and Linux from official GitHub releases with SHA256 verification.
 
 | Platform | Script                                                   | Supported Architectures        |
 | -------- | -------------------------------------------------------- | ------------------------------ |
@@ -34,7 +34,9 @@ Install, update, check, or uninstall PowerShell 7+ on Windows, macOS, and Linux 
 
 ## Quick Install
 
-These one-liners install or update to the latest stable release. Download the script first if you need options like `--tag`, `--check`, or `-WhatIf`.
+These one-liners install or update to the latest stable release.
+
+> You'll need to download the script first if you need options like `--tag`, `--check`, or `-WhatIf`.
 
 ### Windows
 
