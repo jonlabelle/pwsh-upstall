@@ -4,7 +4,7 @@
 
 Install, update, check, or uninstall PowerShell 7+ on Windows, macOS, and Linux from official GitHub releases with SHA256 verification.
 
-| Platform | Script                                                   | Architecture                   |
+| Platform | Script                                                   | Supported Architectures        |
 | -------- | -------------------------------------------------------- | ------------------------------ |
 | Windows  | [`pwsh-upstall-windows.ps1`](./pwsh-upstall-windows.ps1) | x64/arm64                      |
 | macOS    | [`pwsh-upstall-macos.sh`](./pwsh-upstall-macos.sh)       | Apple Silicon and Intel        |
