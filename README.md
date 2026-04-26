@@ -49,7 +49,7 @@ irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/p
 ```
 
 > [!Note]
-> `powershell.exe -` runs the script from stdin and cannot pass script parameters. Use `powershell -File .\pwsh-upstall-windows.ps1 ...` when you need `-Tag`, `-Check`, `-WhatIf`, or other options.
+> `powershell.exe -` runs the script from stdin and cannot pass script parameters. Use `powershell -File .\pwsh-upstall-windows.ps1 ...` when you need `-Tag`, `-Check`, `-WhatIf`, or [other options](#options).
 
 ### macOS
 
@@ -65,11 +65,29 @@ curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/
 
 ## Common Actions
 
-| Action                           | macOS                                      | Linux                                    | Windows                                                  |
-| -------------------------------- | ------------------------------------------ | ---------------------------------------- | -------------------------------------------------------- |
-| Install/update latest stable     | `bash ./pwsh-upstall-macos.sh`             | `sh ./pwsh-upstall-linux.sh`             | `powershell -File .\pwsh-upstall-windows.ps1`            |
-| Check if up to date (no install) | `bash ./pwsh-upstall-macos.sh --check`     | `sh ./pwsh-upstall-linux.sh --check`     | `powershell -File .\pwsh-upstall-windows.ps1 -Check`     |
-| Uninstall                        | `bash ./pwsh-upstall-macos.sh --uninstall` | `sh ./pwsh-upstall-linux.sh --uninstall` | `powershell -File .\pwsh-upstall-windows.ps1 -Uninstall` |
+**Windows:**
+
+| Action                           | Command                                                  |
+| -------------------------------- | -------------------------------------------------------- |
+| Install/update latest stable     | `powershell -File .\pwsh-upstall-windows.ps1`            |
+| Check if up to date (no install) | `powershell -File .\pwsh-upstall-windows.ps1 -Check`     |
+| Uninstall                        | `powershell -File .\pwsh-upstall-windows.ps1 -Uninstall` |
+
+**macOS:**
+
+| Action                           | Command                                    |
+| -------------------------------- | ------------------------------------------ |
+| Install/update latest stable     | `bash ./pwsh-upstall-macos.sh`             |
+| Check if up to date (no install) | `bash ./pwsh-upstall-macos.sh --check`     |
+| Uninstall                        | `bash ./pwsh-upstall-macos.sh --uninstall` |
+
+**Linux:**
+
+| Action                           | Command                                  |
+| -------------------------------- | ---------------------------------------- |
+| Install/update latest stable     | `sh ./pwsh-upstall-linux.sh`             |
+| Check if up to date (no install) | `sh ./pwsh-upstall-linux.sh --check`     |
+| Uninstall                        | `sh ./pwsh-upstall-linux.sh --uninstall` |
 
 ## Options
 
