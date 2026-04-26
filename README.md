@@ -115,8 +115,6 @@ powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.6.4
 
 Download the script first when you need to pass options.
 
-### macOS/Linux
-
 ### Windows
 
 ```powershell
@@ -126,6 +124,8 @@ Invoke-WebRequest `
 
 powershell -File .\pwsh-upstall-windows.ps1 -Tag v7.6
 ```
+
+### macOS/Linux
 
 ```bash
 # macOS
