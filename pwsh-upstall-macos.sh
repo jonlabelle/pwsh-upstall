@@ -219,9 +219,11 @@ check_network() {
     return 0
   fi
 
+  local token
+  token="$(github_token)"
   local status=""
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${GITHUB_TOKEN}" "https://api.github.com" 2>/dev/null || true)"
+  if [[ -n "${token}" ]]; then
+    status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${token}" "https://api.github.com" 2>/dev/null || true)"
   else
     status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "https://api.github.com" 2>/dev/null || true)"
   fi
@@ -229,6 +231,14 @@ check_network() {
   if [[ -z "${status}" || "${status}" == "000" || "${status}" -ge 500 ]]; then
     log_error "ERROR: Cannot reach GitHub API. Check your internet connection."
     exit 1
+  fi
+}
+
+github_token() {
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    printf '%s\n' "${GITHUB_TOKEN}"
+  elif [[ -n "${GH_TOKEN:-}" ]]; then
+    printf '%s\n' "${GH_TOKEN}"
   fi
 }
 
@@ -352,8 +362,10 @@ get_release_metadata() {
 
   local json
   # Use GitHub token if available (avoids rate limiting in CI environments)
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    json="$(curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${GITHUB_TOKEN}" "${release_url}")"
+  local token
+  token="$(github_token)"
+  if [[ -n "${token}" ]]; then
+    json="$(curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${token}" "${release_url}")"
   else
     json="$(curl -fsSL --retry 3 --retry-delay 2 "${release_url}")"
   fi
@@ -409,8 +421,10 @@ PY
 
 github_api_get() {
   local url="${1}"
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${GITHUB_TOKEN}" "${url}"
+  local token
+  token="$(github_token)"
+  if [[ -n "${token}" ]]; then
+    curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${token}" "${url}"
   else
     curl -fsSL --retry 3 --retry-delay 2 "${url}"
   fi

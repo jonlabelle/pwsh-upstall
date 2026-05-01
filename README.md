@@ -22,6 +22,7 @@ Install, update, check, or uninstall PowerShell Core on Windows, macOS, and Linu
   - [Linux](#linux)
 - [Common Actions](#common-actions)
 - [Options](#options)
+- [Environment Token Resolution](#environment-token-resolution)
 - [Select a Version](#select-a-version)
 - [Run with Options](#run-with-options)
   - [macOS/Linux](#macoslinux)
@@ -106,6 +107,10 @@ curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/
 
 > [!Note]
 > Windows automatically detects x64/arm64 architecture, requires Administrator privileges, and installs to `Program Files\PowerShell\7`.
+
+## Environment Token Resolution
+
+For GitHub API requests, each script checks `GITHUB_TOKEN` first, then `GH_TOKEN`. If either is set, it is sent as a bearer token to help avoid GitHub API rate limits; if neither is set, requests are unauthenticated.
 
 ## Select a Version
 

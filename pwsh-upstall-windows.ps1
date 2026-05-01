@@ -273,8 +273,19 @@ function Invoke-PwshUpstallWindows
 
         try
         {
+            $headers = @{
+                'User-Agent' = 'pwsh-upstall'
+            }
+
+            $githubToken = Get-GitHubToken
+            if ($githubToken)
+            {
+                $headers['Authorization'] = "Bearer $githubToken"
+            }
+
             $null = Invoke-CompatRestMethod -Parameters @{
                 Uri = 'https://api.github.com'
+                Headers = $headers
                 TimeoutSec = 10
                 ErrorAction = 'Stop'
             }
@@ -285,6 +296,21 @@ function Invoke-PwshUpstallWindows
             Write-Error -Message 'Cannot reach GitHub API. Check your internet connection.' -ErrorAction Continue
             return $false
         }
+    }
+
+    function Get-GitHubToken
+    {
+        if ($env:GITHUB_TOKEN)
+        {
+            return $env:GITHUB_TOKEN
+        }
+
+        if ($env:GH_TOKEN)
+        {
+            return $env:GH_TOKEN
+        }
+
+        return $null
     }
 
     function Test-DiskSpace
@@ -439,9 +465,10 @@ function Invoke-PwshUpstallWindows
         }
 
         # Use GitHub token if available (avoids rate limiting in CI environments)
-        if ($env:GITHUB_TOKEN)
+        $githubToken = Get-GitHubToken
+        if ($githubToken)
         {
-            $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN"
+            $headers['Authorization'] = "Bearer $githubToken"
         }
 
         $params = @{

@@ -235,8 +235,9 @@ check_network() {
   fi
 
   _status=""
-  if [ -n "${GITHUB_TOKEN:-}" ]; then
-    _status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${GITHUB_TOKEN}" "https://api.github.com" 2>/dev/null || true)"
+  _github_token="$(github_token)"
+  if [ -n "${_github_token}" ]; then
+    _status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${_github_token}" "https://api.github.com" 2>/dev/null || true)"
   else
     _status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "https://api.github.com" 2>/dev/null || true)"
   fi
@@ -244,6 +245,14 @@ check_network() {
   if [ -z "${_status}" ] || [ "${_status}" = "000" ] || [ "${_status}" -ge 500 ]; then
     log_error "ERROR: Cannot reach GitHub API. Check your internet connection."
     exit 1
+  fi
+}
+
+github_token() {
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    printf '%s\n' "${GITHUB_TOKEN}"
+  elif [ -n "${GH_TOKEN:-}" ]; then
+    printf '%s\n' "${GH_TOKEN}"
   fi
 }
 
@@ -365,8 +374,9 @@ get_release_metadata() {
   log "Fetching release metadata: ${_release_url}" >&2
 
   # Use GitHub token if available (avoids rate limiting in CI environments)
-  if [ -n "${GITHUB_TOKEN:-}" ]; then
-    _json="$(curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${GITHUB_TOKEN}" "${_release_url}")"
+  _github_token="$(github_token)"
+  if [ -n "${_github_token}" ]; then
+    _json="$(curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${_github_token}" "${_release_url}")"
   else
     _json="$(curl -fsSL --retry 3 --retry-delay 2 "${_release_url}")"
   fi
@@ -422,8 +432,9 @@ PY
 
 github_api_get() {
   _url="${1}"
-  if [ -n "${GITHUB_TOKEN:-}" ]; then
-    curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${GITHUB_TOKEN}" "${_url}"
+  _github_token="$(github_token)"
+  if [ -n "${_github_token}" ]; then
+    curl -fsSL --retry 3 --retry-delay 2 -H "Authorization: Bearer ${_github_token}" "${_url}"
   else
     curl -fsSL --retry 3 --retry-delay 2 "${_url}"
   fi
