@@ -49,9 +49,6 @@ irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/p
     powershell -NoProfile -ExecutionPolicy Bypass -
 ```
 
-> [!Note]
-> `powershell.exe -` runs the script from stdin and cannot pass script parameters. Use `powershell -File .\pwsh-upstall-windows.ps1 ...` when you need `-Tag`, `-Check`, `-WhatIf`, or [other options](#options).
-
 ### macOS
 
 ```bash
