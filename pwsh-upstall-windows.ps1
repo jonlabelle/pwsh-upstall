@@ -31,9 +31,6 @@
     .PARAMETER Force
         Reinstall even if the target version is already installed.
 
-    .PARAMETER KeepOldVersion
-        Keep the previously installed version during upgrade by skipping the explicit uninstall step.
-
     .PARAMETER Check
         Only check if the installed version is up to date with the latest available release.
 
@@ -103,7 +100,7 @@
         - Performs silent installation with msiexec
         - Validates disk space before installation
         - Uses semantic version comparison to detect upgrades
-        - Removes the older version before upgrade unless -KeepOldVersion is used
+        - Lets Windows Installer replace the older stable MSI version during upgrade
 
         Default behavior downloads the latest stable release (not preview/RC).
         Prereleases are supported only via explicit exact tag
@@ -127,7 +124,6 @@ function Invoke-PwshUpstallWindows
         [string]$OutDir,
         [switch]$Keep,
         [switch]$Force,
-        [switch]$KeepOldVersion,
         [switch]$Check,
         [switch]$Uninstall,
         [switch]$SkipChecksum
@@ -257,7 +253,7 @@ function Invoke-PwshUpstallWindows
     Enable-Tls12
     Assert-RunAsAdministrator
 
-    if ($Check -and ($Tag -or $OutDir -or $Keep -or $Force -or $KeepOldVersion -or $Uninstall -or $SkipChecksum))
+    if ($Check -and ($Tag -or $OutDir -or $Keep -or $Force -or $Uninstall -or $SkipChecksum))
     {
         Write-Error 'The -Check option cannot be combined with install/uninstall options.'
         exit 1
@@ -409,6 +405,16 @@ function Invoke-PwshUpstallWindows
 
                         $displayName = $itemKey.GetValue('DisplayName')
                         $uninstallString = $itemKey.GetValue('UninstallString')
+                        $quietUninstallString = $itemKey.GetValue('QuietUninstallString')
+                        $isWindowsInstaller = [int]$itemKey.GetValue('WindowsInstaller', 0) -eq 1
+                        $productCode = if ($isWindowsInstaller -and $subKeyName -match '^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$')
+                        {
+                            $subKeyName
+                        }
+                        else
+                        {
+                            $null
+                        }
                         $isSupportedPwshInstall = $displayName -and $displayName -notmatch 'x86' -and (
                             $displayName -match '^PowerShell 7' -or
                             ($displayName -match '^PowerShell\b' -and $displayName -match 'x64|arm64|7')
@@ -416,11 +422,13 @@ function Invoke-PwshUpstallWindows
 
                         if ($isSupportedPwshInstall)
                         {
-                            if ($uninstallString)
+                            if ($uninstallString -or $quietUninstallString -or $productCode)
                             {
                                 return [PSCustomObject]@{
                                     DisplayName = $displayName
                                     UninstallString = $uninstallString
+                                    QuietUninstallString = $quietUninstallString
+                                    ProductCode = $productCode
                                 }
                             }
                         }
@@ -700,6 +708,79 @@ function Invoke-PwshUpstallWindows
         }
     }
 
+    function Get-PwshUninstallCommand
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            $Info
+        )
+
+        $commandLine = if ($Info.QuietUninstallString)
+        {
+            [string]$Info.QuietUninstallString
+        }
+        else
+        {
+            [string]$Info.UninstallString
+        }
+
+        $exe = $null
+        $uninstallArgs = $null
+
+        if ($commandLine -match '^\s*"([^"]+\.exe)"(?:\s+(.*))?\s*$')
+        {
+            $exe = $matches[1]
+            $uninstallArgs = $matches[2]
+        }
+        elseif ($commandLine -match '^\s*(\S+\.exe)(?:\s+(.*))?\s*$')
+        {
+            $exe = $matches[1]
+            $uninstallArgs = $matches[2]
+        }
+        elseif ($Info.ProductCode)
+        {
+            $exe = 'msiexec.exe'
+        }
+        else
+        {
+            throw "Could not parse uninstall command: $commandLine"
+        }
+
+        if ($exe -match '(?i)(?:^|[\\/])msiexec\.exe$')
+        {
+            $exe = 'msiexec.exe'
+
+            if ($Info.ProductCode)
+            {
+                $uninstallArgs = "/x $($Info.ProductCode)"
+            }
+            elseif ($uninstallArgs -match '(?i)^\s*/(?:i|package)(?=\s*[\{"])')
+            {
+                $uninstallArgs = $uninstallArgs -replace '(?i)^\s*/(?:i|package)', '/x'
+            }
+
+            if ($uninstallArgs -notmatch '(?i)(?:^|\s)/(?:x|uninstall)(?=\s*[\{"])')
+            {
+                throw "MSI uninstall command does not identify a product to remove: $commandLine"
+            }
+
+            if ($uninstallArgs -notmatch '(?i)(?:^|\s)/(?:quiet|q[nbrf]?)(?:\s|$)')
+            {
+                $uninstallArgs += ' /qn'
+            }
+
+            if ($uninstallArgs -notmatch '(?i)(?:^|\s)/norestart(?:\s|$)')
+            {
+                $uninstallArgs += ' /norestart'
+            }
+        }
+
+        return [PSCustomObject]@{
+            FilePath = $exe
+            ArgumentList = $uninstallArgs
+        }
+    }
+
     function Invoke-PwshUninstallCommand
     {
         param(
@@ -708,23 +789,29 @@ function Invoke-PwshUpstallWindows
             [switch]$SkipUserDirNotice
         )
 
-        $exe = $Info.UninstallString
-        $uninstallArgs = $null
-        if ($exe -match '^\s*"?([^"\s]+\.exe)"?\s+(.*)$')
+        $command = Get-PwshUninstallCommand -Info $Info
+        Write-Verbose "Running uninstall command: $($command.FilePath) $($command.ArgumentList)"
+
+        $proc = Start-Process -FilePath $command.FilePath -ArgumentList $command.ArgumentList -Wait -PassThru
+        if ($proc.ExitCode -notin @(0, 1641, 3010))
         {
-            $exe = $matches[1]
-            $uninstallArgs = $matches[2]
+            $message = if ($proc.ExitCode -eq 1612)
+            {
+                'Uninstall failed with exit code 1612: the cached Windows Installer source is unavailable.'
+            }
+            else
+            {
+                "Uninstall failed with exit code: $($proc.ExitCode)"
+            }
+
+            $exception = New-Object System.InvalidOperationException($message)
+            $exception.Data['ExitCode'] = $proc.ExitCode
+            throw $exception
         }
 
-        if ($exe -match 'msiexec' -and $uninstallArgs -notmatch '/q[nrb]?')
+        if ($proc.ExitCode -in @(1641, 3010))
         {
-            $uninstallArgs += ' /qn /norestart'
-        }
-
-        $proc = Start-Process -FilePath $exe -ArgumentList $uninstallArgs -Wait -PassThru
-        if ($proc.ExitCode -ne 0)
-        {
-            throw "Uninstall failed with exit code: $($proc.ExitCode)"
+            Write-Warn "PowerShell was uninstalled successfully; Windows Installer requested a reboot (exit code $($proc.ExitCode))."
         }
 
         if (-not $SkipUserDirNotice)
@@ -803,13 +890,14 @@ function Invoke-PwshUpstallWindows
     if ($Uninstall)
     {
         $info = Get-PwshUninstallInfo
-        if (-not $info -or -not $info.DisplayName -or -not $info.UninstallString)
+        if (-not $info -or -not $info.DisplayName -or (-not $info.UninstallString -and -not $info.QuietUninstallString -and -not $info.ProductCode))
         {
             Write-Warn 'No PowerShell install found via MSI uninstall entries.'
             return
         }
         Write-Info "Found PowerShell install: $($info.DisplayName)"
-        if ($PSCmdlet.ShouldProcess($info.DisplayName, "Uninstall via $($info.UninstallString)"))
+        $uninstallCommand = Get-PwshUninstallCommand -Info $info
+        if ($PSCmdlet.ShouldProcess($info.DisplayName, "Uninstall via $($uninstallCommand.FilePath) $($uninstallCommand.ArgumentList)"))
         {
             try
             {
@@ -844,7 +932,6 @@ function Invoke-PwshUpstallWindows
     $installed = Get-InstalledPwshVersion
     $versionComparison = $null
     $upgradeFromVersion = $null
-    $upgradeUninstallInfo = $null
 
     if ($installed -and $targetVersion)
     {
@@ -852,10 +939,6 @@ function Invoke-PwshUpstallWindows
         if ($versionComparison -lt 0)
         {
             $upgradeFromVersion = $installed
-            if (-not $KeepOldVersion)
-            {
-                $upgradeUninstallInfo = Get-PwshUninstallInfo
-            }
         }
     }
 
@@ -894,18 +977,7 @@ function Invoke-PwshUpstallWindows
         Write-Host '  Would run     : msiexec.exe /i <downloaded-msi> /qn /norestart'
         if ($upgradeFromVersion)
         {
-            if ($KeepOldVersion)
-            {
-                Write-Host "  Would keep    : previous version $upgradeFromVersion"
-            }
-            elseif ($upgradeUninstallInfo)
-            {
-                Write-Host "  Would remove  : previous version $upgradeFromVersion before install"
-            }
-            else
-            {
-                Write-Host "  Would attempt : to remove previous version $upgradeFromVersion before install (no MSI uninstall entry found yet)"
-            }
+            Write-Host "  Would upgrade : $upgradeFromVersion to $targetVersion in place via Windows Installer"
         }
         return
     }
@@ -926,22 +998,7 @@ function Invoke-PwshUpstallWindows
     {
         if ($upgradeFromVersion)
         {
-            if ($KeepOldVersion)
-            {
-                Write-Info "Keeping previous PowerShell version $upgradeFromVersion during upgrade (-KeepOldVersion)."
-            }
-            elseif ($upgradeUninstallInfo)
-            {
-                Write-Info "Removing previous PowerShell version $upgradeFromVersion before upgrade..."
-                if ($PSCmdlet.ShouldProcess($upgradeUninstallInfo.DisplayName, "Remove older version $upgradeFromVersion before installing $targetVersion"))
-                {
-                    Invoke-PwshUninstallCommand -Info $upgradeUninstallInfo -SkipUserDirNotice
-                }
-            }
-            else
-            {
-                Write-Warn "Upgrade detected from $upgradeFromVersion to $targetVersion, but no MSI uninstall entry was found; proceeding without explicit removal."
-            }
+            Write-Info "Upgrading PowerShell $upgradeFromVersion to $targetVersion in place via Windows Installer..."
         }
 
         $installerPath = Join-Path -Path $dlDir -ChildPath $asset.name

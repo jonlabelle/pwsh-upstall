@@ -31,7 +31,6 @@ set -euo pipefail
 #     --out-dir <dir>    Save downloaded package to specified directory
 #     --keep             Retain package after installation
 #     --force            Reinstall even if target version already installed
-#     --keep-old-version Preserve the previously installed version when upgrading
 #     --check            Only check if installed version is up to date
 #     --uninstall        Remove PowerShell and associated package receipts
 #     --skip-checksum    Skip SHA256 verification (not recommended)
@@ -67,7 +66,6 @@ set -euo pipefail
 #   - Verifies Microsoft code signature and SHA256 checksums
 #   - Validates disk space before installation
 #   - Removes the previously active version after a successful upgrade
-#     unless --keep-old-version is used
 #   - Default behavior downloads latest stable release (not preview/RC)
 #   - Prereleases are supported only via explicit exact tag
 #     (default/latest/major/minor selection is stable-only)
@@ -83,7 +81,6 @@ TAG="" # e.g., v7.5.4
 KEEP=0
 OUT_DIR="" # optional destination directory for the downloaded pkg
 FORCE=0
-KEEP_OLD_VERSION=0
 UNINSTALL=0
 SKIP_CHECKSUM=0
 CHECK_ONLY=0
@@ -129,7 +126,6 @@ Options:
   --out-dir <dir>    Directory to save the downloaded .pkg (default: temp dir).
   --keep             Keep the downloaded .pkg after installation (default: delete unless --out-dir is used).
   --force            Reinstall even if the target version is already installed.
-  --keep-old-version Keep the previously installed version when upgrading.
   --check            Only check if installed version is up to date; no download or install.
   --uninstall        Uninstall PowerShell from the default install location.
   --skip-checksum    Skip SHA256 checksum verification (not recommended).
@@ -779,11 +775,7 @@ main_install() {
     log "  Would verify  : SHA256 checksum & Microsoft signature"
     log "  Would run     : sudo installer -pkg <downloaded-pkg> -target /"
     if [[ -n "${upgrade_from_version}" ]]; then
-      if [[ "${KEEP_OLD_VERSION}" -eq 1 ]]; then
-        log "  Would keep    : previous version ${upgrade_from_version}"
-      else
-        log "  Would remove  : previous version ${upgrade_from_version} after successful upgrade"
-      fi
+      log "  Would remove  : previous version ${upgrade_from_version} after successful upgrade"
     fi
     trap - EXIT TERM
     exit 0
@@ -816,11 +808,7 @@ main_install() {
   install_package "${pkg_path}"
 
   if [[ -n "${upgrade_from_version}" ]]; then
-    if [[ "${KEEP_OLD_VERSION}" -eq 1 ]]; then
-      log_info "Keeping previous PowerShell version: ${upgrade_from_version}"
-    else
-      remove_previous_install_version "${upgrade_from_version}" "${desired_version}"
-    fi
+    remove_previous_install_version "${upgrade_from_version}" "${desired_version}"
   fi
 
   # Cleanup
@@ -937,10 +925,6 @@ while [[ $# -gt 0 ]]; do
     FORCE=1
     shift
     ;;
-  --keep-old-version)
-    KEEP_OLD_VERSION=1
-    shift
-    ;;
   --check)
     CHECK_ONLY=1
     shift
@@ -970,7 +954,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then
-  if [[ -n "${TAG}" || -n "${OUT_DIR}" || "${KEEP}" -eq 1 || "${FORCE}" -eq 1 || "${KEEP_OLD_VERSION}" -eq 1 || "${UNINSTALL}" -eq 1 || "${SKIP_CHECKSUM}" -eq 1 ]]; then
+  if [[ -n "${TAG}" || -n "${OUT_DIR}" || "${KEEP}" -eq 1 || "${FORCE}" -eq 1 || "${UNINSTALL}" -eq 1 || "${SKIP_CHECKSUM}" -eq 1 ]]; then
     log_error "ERROR: --check cannot be combined with install/uninstall options."
     exit 1
   fi

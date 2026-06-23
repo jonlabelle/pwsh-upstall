@@ -10,7 +10,7 @@ Install, update, check, or uninstall PowerShell Core on Windows, macOS, and Linu
 | macOS    | [`pwsh-upstall-macos.sh`](./pwsh-upstall-macos.sh)       | Apple Silicon and Intel        |
 | Linux    | [`pwsh-upstall-linux.sh`](./pwsh-upstall-linux.sh)       | x64/arm64, glibc/musl (Alpine) |
 
-> Upgrades remove the previously installed version by default. Use `--keep-old-version` or `-KeepOldVersion` to keep it.
+> macOS/Linux upgrades always remove the previously installed version. Windows MSI upgrades replace the previous stable MSI version in place.
 
 ![Checks if PowerShell is up to date](screenshot.png "Checks if PowerShell is up to date")
 
@@ -95,7 +95,6 @@ curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/
 | Save downloaded package/installer   | `--out-dir <dir>`    | `-OutDir <path>`                      |
 | Keep downloaded package/installer   | `--keep`             | `-Keep`                               |
 | Reinstall even if already installed | `--force`            | `-Force`                              |
-| Keep old version during upgrade     | `--keep-old-version` | `-KeepOldVersion`                     |
 | Check only (no install)             | `--check`            | `-Check`                              |
 | Uninstall                           | `--uninstall`        | `-Uninstall`                          |
 | Skip SHA256 verification            | `--skip-checksum`    | `-SkipChecksum`                       |
@@ -210,6 +209,7 @@ sh ./pwsh-upstall-linux.sh
 - **Insufficient disk space**: Free at least 500 MB and rerun the script.
 - **Permission denied**: Run with `sudo` on Linux/macOS or as Administrator on Windows.
 - **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead.
+- **Windows Installer error 1612**: The cached MSI source is unavailable. Upgrades install the newer MSI directly; for standalone uninstall failures, reinstall the same PowerShell version and retry `-Uninstall`.
 - **Windows options with one-liners**: Download the script and run it with `powershell -File .\pwsh-upstall-windows.ps1 ...`.
 
 ## License
