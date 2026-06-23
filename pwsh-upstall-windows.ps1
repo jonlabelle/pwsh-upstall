@@ -36,6 +36,7 @@
 
     .PARAMETER Uninstall
         Remove PowerShell using the MSI uninstall string from the Windows registry.
+        If the cached installer source is missing, rebuild the cache and retry.
 
     .PARAMETER SkipChecksum
         Skip SHA256 checksum verification (not recommended).
@@ -237,6 +238,25 @@ function Invoke-PwshUpstallWindows
         return ($Value -replace '^[vV]', '')
     }
 
+    function Get-NormalizedPwshReleaseVersion
+    {
+        param([string]$Value)
+
+        $version = Remove-VersionPrefix -Value $Value
+        if (-not $version)
+        {
+            return $null
+        }
+
+        $fourPartZeroVersion = [regex]::Match($version, '^(\d+\.\d+\.\d+)\.0$')
+        if ($fourPartZeroVersion.Success)
+        {
+            return $fourPartZeroVersion.Groups[1].Value
+        }
+
+        return $version
+    }
+
     function Get-RegistryViews
     {
         if ([Environment]::Is64BitOperatingSystem)
@@ -404,6 +424,7 @@ function Invoke-PwshUpstallWindows
                         if ($null -eq $itemKey) { continue }
 
                         $displayName = $itemKey.GetValue('DisplayName')
+                        $displayVersion = $itemKey.GetValue('DisplayVersion')
                         $uninstallString = $itemKey.GetValue('UninstallString')
                         $quietUninstallString = $itemKey.GetValue('QuietUninstallString')
                         $isWindowsInstaller = [int]$itemKey.GetValue('WindowsInstaller', 0) -eq 1
@@ -426,6 +447,7 @@ function Invoke-PwshUpstallWindows
                             {
                                 return [PSCustomObject]@{
                                     DisplayName = $displayName
+                                    DisplayVersion = $displayVersion
                                     UninstallString = $uninstallString
                                     QuietUninstallString = $quietUninstallString
                                     ProductCode = $productCode
@@ -731,6 +753,28 @@ function Invoke-PwshUpstallWindows
         return $installerPath
     }
 
+    function Save-PwshInstallerForVersion
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$Version,
+            [Parameter(Mandatory = $true)]
+            [string]$Arch,
+            [Parameter(Mandatory = $true)]
+            [string]$DestinationDirectory,
+            [switch]$SkipVerification
+        )
+
+        $release = Get-Release -TagName $Version -Arch $Arch
+        $assetInfo = Select-Asset -Release $release -Arch $Arch
+
+        return Save-VerifiedAsset `
+            -Asset $assetInfo.Asset `
+            -ShaAsset $assetInfo.ShaAsset `
+            -DestinationDirectory $DestinationDirectory `
+            -SkipVerification:$SkipVerification
+    }
+
     function Invoke-MsiExec
     {
         param(
@@ -789,6 +833,38 @@ function Invoke-PwshUpstallWindows
         }
     }
 
+    function Repair-PwshWindowsInstallerCache
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$Version,
+            [Parameter(Mandatory = $true)]
+            [string]$Arch,
+            [Parameter(Mandatory = $true)]
+            [string]$DownloadDirectory,
+            [switch]$SkipVerification
+        )
+
+        Write-Info "Downloading PowerShell $Version to rebuild the installer cache..."
+        $installerPath = Save-PwshInstallerForVersion `
+            -Version $Version `
+            -Arch $Arch `
+            -DestinationDirectory $DownloadDirectory `
+            -SkipVerification:$SkipVerification
+
+        $safeVersion = $Version -replace '[^0-9A-Za-z.-]', '_'
+        $repairLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeVersion-recache.log"
+        $repairArgs = "/i `"$installerPath`" REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart"
+
+        Write-Info "Rebuilding the PowerShell $Version Windows Installer cache..."
+        $repairProc = Invoke-MsiExec -Arguments $repairArgs -LogPath $repairLogPath
+
+        return [PSCustomObject]@{
+            ExitCode = $repairProc.ExitCode
+            LogPath = $repairLogPath
+        }
+    }
+
     function Get-InstalledPwshVersion
     {
         try
@@ -799,6 +875,24 @@ function Invoke-PwshUpstallWindows
             }
         }
         catch { }
+        return $null
+    }
+
+    function Get-PwshMsiCacheRepairVersion
+    {
+        param($Info)
+
+        $installedVersion = Get-NormalizedPwshReleaseVersion -Value (Get-InstalledPwshVersion)
+        if ($installedVersion)
+        {
+            return $installedVersion
+        }
+
+        if ($Info -and $Info.DisplayVersion)
+        {
+            return Get-NormalizedPwshReleaseVersion -Value ([string]$Info.DisplayVersion)
+        }
+
         return $null
     }
 
@@ -903,14 +997,23 @@ function Invoke-PwshUpstallWindows
         param(
             [Parameter(Mandatory = $true)]
             $Info,
+            [string]$LogPath,
             [switch]$SkipUserDirNotice
         )
 
         $command = Get-PwshUninstallCommand -Info $Info
         Write-Verbose "Running uninstall command: $($command.FilePath) $($command.ArgumentList)"
 
-        $proc = Start-Process -FilePath $command.FilePath -ArgumentList $command.ArgumentList -Wait -PassThru
-        if ($proc.ExitCode -notin @(0, 1641, 3010))
+        $proc = if ($command.FilePath -eq 'msiexec.exe' -and $LogPath)
+        {
+            Invoke-MsiExec -Arguments $command.ArgumentList -LogPath $LogPath
+        }
+        else
+        {
+            Start-Process -FilePath $command.FilePath -ArgumentList $command.ArgumentList -Wait -PassThru
+        }
+
+        if (-not (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode))
         {
             $message = if ($proc.ExitCode -eq 1612)
             {
@@ -923,6 +1026,9 @@ function Invoke-PwshUpstallWindows
 
             $exception = New-Object System.InvalidOperationException($message)
             $exception.Data['ExitCode'] = $proc.ExitCode
+            $exception.Data['LogPath'] = $LogPath
+            $exception.Data['FilePath'] = $command.FilePath
+            $exception.Data['ArgumentList'] = $command.ArgumentList
             throw $exception
         }
 
@@ -1014,16 +1120,157 @@ function Invoke-PwshUpstallWindows
         }
         Write-Info "Found PowerShell install: $($info.DisplayName)"
         $uninstallCommand = Get-PwshUninstallCommand -Info $info
+        $isMsiUninstall = $uninstallCommand.FilePath -eq 'msiexec.exe'
+        $logVersion = if ($info.DisplayVersion)
+        {
+            Get-NormalizedPwshReleaseVersion -Value ([string]$info.DisplayVersion)
+        }
+        else
+        {
+            'installed'
+        }
+        if (-not $logVersion)
+        {
+            $logVersion = 'installed'
+        }
+        $safeLogVersion = $logVersion -replace '[^0-9A-Za-z.-]', '_'
+        $uninstallLogPath = if ($isMsiUninstall)
+        {
+            Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeLogVersion-uninstall.log"
+        }
+        else
+        {
+            $null
+        }
+
         if ($PSCmdlet.ShouldProcess($info.DisplayName, "Uninstall via $($uninstallCommand.FilePath) $($uninstallCommand.ArgumentList)"))
         {
             try
             {
-                Invoke-PwshUninstallCommand -Info $info
+                Invoke-PwshUninstallCommand -Info $info -LogPath $uninstallLogPath
+                if ($uninstallLogPath)
+                {
+                    Remove-Item -Force $uninstallLogPath -ErrorAction SilentlyContinue
+                }
             }
             catch
             {
-                Write-Error $_
-                exit 1
+                $exitCode = $_.Exception.Data['ExitCode']
+                $failedLogPath = [string]$_.Exception.Data['LogPath']
+                $isMsiFailure = [string]$_.Exception.Data['FilePath'] -eq 'msiexec.exe'
+                $missingSource = $isMsiFailure -and (
+                    $exitCode -eq 1612 -or
+                    ($failedLogPath -and (Test-MsiLogForMissingSource -LogPath $failedLogPath))
+                )
+
+                if (-not $missingSource)
+                {
+                    if ($isMsiFailure -and $null -ne $exitCode -and $failedLogPath)
+                    {
+                        Show-MsiFailureDetails -ExitCode $exitCode -LogPath $failedLogPath
+                        exit $exitCode
+                    }
+
+                    if ($failedLogPath)
+                    {
+                        Write-Warn "Original uninstall log: $failedLogPath"
+                    }
+                    if ($repairResult -and $repairResult.LogPath)
+                    {
+                        Write-Warn "Installer cache repair log: $($repairResult.LogPath)"
+                    }
+                    Write-Error $_
+                    exit 1
+                }
+
+                $repairVersion = Get-PwshMsiCacheRepairVersion -Info $info
+                if (-not $repairVersion)
+                {
+                    Write-Error -Message 'Uninstall failed with error 1612 and the installed PowerShell version could not be determined for cache repair.' -ErrorAction Continue
+                    if ($failedLogPath)
+                    {
+                        Write-Warn "Original uninstall log: $failedLogPath"
+                    }
+                    exit $exitCode
+                }
+
+                Write-Warn "The Windows Installer cache for PowerShell $repairVersion is missing (error 1612)."
+                Write-Info 'Checking network connectivity...'
+                if (-not (Test-NetworkConnectivity))
+                {
+                    exit 1
+                }
+
+                if (-not (Test-DiskSpace -Path $env:ProgramFiles -RequiredMB 500))
+                {
+                    exit 1
+                }
+
+                $repairDlDir = if ($OutDir)
+                {
+                    $OutDir
+                }
+                else
+                {
+                    Join-Path -Path $env:TEMP -ChildPath ('pwsh-upstall-' + [guid]::NewGuid())
+                }
+
+                if (-not $PSCmdlet.ShouldProcess($repairDlDir, 'Create download directory for installer cache repair'))
+                {
+                    return
+                }
+
+                New-Item -ItemType Directory -Force -Path $repairDlDir | Out-Null
+
+                try
+                {
+                    $repairResult = Repair-PwshWindowsInstallerCache `
+                        -Version $repairVersion `
+                        -Arch $arch `
+                        -DownloadDirectory $repairDlDir `
+                        -SkipVerification:$SkipChecksum
+
+                    if (-not (Test-MsiSuccessExitCode -ExitCode $repairResult.ExitCode))
+                    {
+                        Show-MsiFailureDetails -ExitCode $repairResult.ExitCode -LogPath $repairResult.LogPath
+                        if ($failedLogPath)
+                        {
+                            Write-Warn "Original uninstall log: $failedLogPath"
+                        }
+                        exit $repairResult.ExitCode
+                    }
+
+                    $safeRepairVersion = $repairVersion -replace '[^0-9A-Za-z.-]', '_'
+                    $retryLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeRepairVersion-uninstall-retry.log"
+                    Write-Info 'Installer cache rebuilt; retrying PowerShell uninstall...'
+                    Invoke-PwshUninstallCommand -Info $info -LogPath $retryLogPath
+                    Remove-Item -Force $failedLogPath, $repairResult.LogPath, $retryLogPath -ErrorAction SilentlyContinue
+                }
+                catch
+                {
+                    $retryExitCode = $_.Exception.Data['ExitCode']
+                    $retryLogPath = [string]$_.Exception.Data['LogPath']
+                    if ($null -ne $retryExitCode -and $retryLogPath)
+                    {
+                        Show-MsiFailureDetails -ExitCode $retryExitCode -LogPath $retryLogPath
+                        if ($failedLogPath)
+                        {
+                            Write-Warn "Original uninstall log: $failedLogPath"
+                        }
+                        Write-Warn "Installer cache repair log: $($repairResult.LogPath)"
+                        exit $retryExitCode
+                    }
+
+                    Write-Error $_
+                    exit 1
+                }
+                finally
+                {
+                    if (-not $Keep -and -not $OutDir)
+                    {
+                        Remove-Item -Recurse -Force $repairDlDir -ErrorAction SilentlyContinue
+                    }
+                }
             }
         }
         return
@@ -1134,27 +1381,17 @@ function Invoke-PwshUpstallWindows
                 (Test-MsiLogForMissingSource -LogPath $installLogPath))
             {
                 Write-Warn "The Windows Installer cache for PowerShell $upgradeFromVersion is missing (error 1612)."
-                Write-Info "Downloading PowerShell $upgradeFromVersion to rebuild the installer cache..."
-
-                $previousRelease = Get-Release -TagName $upgradeFromVersion -Arch $arch
-                $previousAssetInfo = Select-Asset -Release $previousRelease -Arch $arch
-                $previousInstallerPath = Save-VerifiedAsset `
-                    -Asset $previousAssetInfo.Asset `
-                    -ShaAsset $previousAssetInfo.ShaAsset `
-                    -DestinationDirectory $dlDir `
+                $repairResult = Repair-PwshWindowsInstallerCache `
+                    -Version $upgradeFromVersion `
+                    -Arch $arch `
+                    -DownloadDirectory $dlDir `
                     -SkipVerification:$SkipChecksum
 
-                $safePreviousVersion = $upgradeFromVersion -replace '[^0-9A-Za-z.-]', '_'
-                $repairLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safePreviousVersion-recache.log"
-                $repairArgs = "/i `"$previousInstallerPath`" REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart"
-                Write-Info "Rebuilding the PowerShell $upgradeFromVersion Windows Installer cache..."
-                $repairProc = Invoke-MsiExec -Arguments $repairArgs -LogPath $repairLogPath
-
-                if (-not (Test-MsiSuccessExitCode -ExitCode $repairProc.ExitCode))
+                if (-not (Test-MsiSuccessExitCode -ExitCode $repairResult.ExitCode))
                 {
-                    Show-MsiFailureDetails -ExitCode $repairProc.ExitCode -LogPath $repairLogPath
+                    Show-MsiFailureDetails -ExitCode $repairResult.ExitCode -LogPath $repairResult.LogPath
                     Write-Warn "Original upgrade log: $installLogPath"
-                    exit $repairProc.ExitCode
+                    exit $repairResult.ExitCode
                 }
 
                 $retryLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeTargetVersion-install-retry.log"
@@ -1162,13 +1399,13 @@ function Invoke-PwshUpstallWindows
                 $proc = Invoke-MsiExec -Arguments $msiArgs -LogPath $retryLogPath
                 if (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode)
                 {
-                    Remove-Item -Force $installLogPath, $repairLogPath, $retryLogPath -ErrorAction SilentlyContinue
+                    Remove-Item -Force $installLogPath, $repairResult.LogPath, $retryLogPath -ErrorAction SilentlyContinue
                 }
                 else
                 {
                     Show-MsiFailureDetails -ExitCode $proc.ExitCode -LogPath $retryLogPath
                     Write-Warn "Original upgrade log: $installLogPath"
-                    Write-Warn "Installer cache repair log: $repairLogPath"
+                    Write-Warn "Installer cache repair log: $($repairResult.LogPath)"
                     exit $proc.ExitCode
                 }
             }

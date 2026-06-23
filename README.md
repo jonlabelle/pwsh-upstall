@@ -89,17 +89,17 @@ curl -fsSL https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/
 
 ## Options
 
-| Purpose                             | macOS/Linux          | Windows                               |
-| ----------------------------------- | -------------------- | ------------------------------------- |
-| Select version                      | `--tag <tag>`        | `-Tag <tag>`                          |
-| Save downloaded package/installer   | `--out-dir <dir>`    | `-OutDir <path>`                      |
-| Keep downloaded package/installer   | `--keep`             | `-Keep`                               |
-| Reinstall even if already installed | `--force`            | `-Force`                              |
-| Check only (no install)             | `--check`            | `-Check`                              |
-| Uninstall                           | `--uninstall`        | `-Uninstall`                          |
-| Skip SHA256 verification            | `--skip-checksum`    | `-SkipChecksum`                       |
-| Dry run                             | `-n, --dry-run`      | `-WhatIf`                             |
-| Help                                | `-h, --help`         | `Get-Help .\pwsh-upstall-windows.ps1` |
+| Purpose                             | macOS/Linux       | Windows                               |
+| ----------------------------------- | ----------------- | ------------------------------------- |
+| Select version                      | `--tag <tag>`     | `-Tag <tag>`                          |
+| Save downloaded package/installer   | `--out-dir <dir>` | `-OutDir <path>`                      |
+| Keep downloaded package/installer   | `--keep`          | `-Keep`                               |
+| Reinstall even if already installed | `--force`         | `-Force`                              |
+| Check only (no install)             | `--check`         | `-Check`                              |
+| Uninstall                           | `--uninstall`     | `-Uninstall`                          |
+| Skip SHA256 verification            | `--skip-checksum` | `-SkipChecksum`                       |
+| Dry run                             | `-n, --dry-run`   | `-WhatIf`                             |
+| Help                                | `-h, --help`      | `Get-Help .\pwsh-upstall-windows.ps1` |
 
 > [!Note]
 > Windows automatically detects x64/arm64 architecture, requires Administrator privileges, and installs to `Program Files\PowerShell\7`.
@@ -209,7 +209,7 @@ sh ./pwsh-upstall-linux.sh
 - **Insufficient disk space**: Free at least 500 MB and rerun the script.
 - **Permission denied**: Run with `sudo` on Linux/macOS or as Administrator on Windows.
 - **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead.
-- **Windows Installer errors 1603/1612**: A missing cached MSI can make an upgrade return 1603 while removing the old release. The Windows script detects this condition, downloads and verifies the installed release's MSI, rebuilds the installer cache, and retries. Other MSI failures retain a verbose log under `%TEMP%\pwsh-upstall-*.log`.
+- **Windows Installer errors 1603/1612**: A missing cached MSI can make an upgrade return 1603 while removing the old release or make uninstall return 1612. The Windows script detects this condition, downloads and verifies the installed release's MSI, rebuilds the installer cache, and retries. Other MSI failures retain a verbose log under `%TEMP%\pwsh-upstall-*.log`.
 - **Windows options with one-liners**: Download the script and run it with `powershell -File .\pwsh-upstall-windows.ps1 ...`.
 
 ## License
