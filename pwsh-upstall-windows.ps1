@@ -672,6 +672,123 @@ function Invoke-PwshUpstallWindows
         throw "Could not determine expected SHA256 for '$AssetName' from '$ChecksumPath'."
     }
 
+    function Save-VerifiedAsset
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            $Asset,
+            $ShaAsset,
+            [Parameter(Mandatory = $true)]
+            [string]$DestinationDirectory,
+            [switch]$SkipVerification
+        )
+
+        $installerPath = Join-Path -Path $DestinationDirectory -ChildPath $Asset.name
+
+        if (Test-Path $installerPath)
+        {
+            Write-Verbose "Removing existing incomplete download: $installerPath"
+            Remove-Item -Force $installerPath
+        }
+
+        if ($PSCmdlet.ShouldProcess($installerPath, 'Download installer'))
+        {
+            $null = Invoke-CompatWebRequest -Parameters @{
+                Uri = $Asset.browser_download_url
+                OutFile = $installerPath
+            }
+        }
+
+        if (-not $SkipVerification -and $ShaAsset)
+        {
+            $shaPath = "$installerPath.sha256"
+            Write-Info 'Downloading checksum file...'
+            if ($PSCmdlet.ShouldProcess($shaPath, 'Download SHA256 checksum'))
+            {
+                $null = Invoke-CompatWebRequest -Parameters @{
+                    Uri = $ShaAsset.browser_download_url
+                    OutFile = $shaPath
+                }
+            }
+
+            Write-Info 'Verifying SHA256 checksum...'
+            $expectedSha = (Get-ExpectedSha256 -ChecksumPath $shaPath -AssetName $Asset.name).ToUpperInvariant()
+            $actualSha = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToUpperInvariant()
+
+            if ($expectedSha -ne $actualSha)
+            {
+                throw "SHA256 checksum verification failed for '$($Asset.name)'. Expected: $expectedSha; got: $actualSha"
+            }
+
+            Write-Success 'SHA256 checksum verified successfully'
+            Remove-Item -Force $shaPath
+        }
+        elseif (-not $SkipVerification)
+        {
+            Write-Warning 'SHA256 file not found, skipping checksum verification'
+        }
+
+        return $installerPath
+    }
+
+    function Invoke-MsiExec
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$Arguments,
+            [Parameter(Mandatory = $true)]
+            [string]$LogPath
+        )
+
+        Remove-Item -Force $LogPath -ErrorAction SilentlyContinue
+        $loggedArguments = "$Arguments /L*v `"$LogPath`""
+        Write-Verbose "Running: msiexec.exe $loggedArguments"
+        return Start-Process -FilePath 'msiexec.exe' -ArgumentList $loggedArguments -Wait -PassThru
+    }
+
+    function Test-MsiSuccessExitCode
+    {
+        param([int]$ExitCode)
+        return $ExitCode -in @(0, 1641, 3010)
+    }
+
+    function Test-MsiLogForMissingSource
+    {
+        param([string]$LogPath)
+
+        if (-not (Test-Path $LogPath))
+        {
+            return $false
+        }
+
+        return [bool](Select-String -Path $LogPath -Pattern 'System Error 1612|actual error code 1612|ERROR_INSTALL_SOURCE_ABSENT' -Quiet)
+    }
+
+    function Show-MsiFailureDetails
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            [int]$ExitCode,
+            [Parameter(Mandatory = $true)]
+            [string]$LogPath
+        )
+
+        Write-Error -Message "MSI operation failed with exit code: $ExitCode" -ErrorAction Continue
+        if (Test-Path $LogPath)
+        {
+            $failureLines = @(Select-String -Path $LogPath -Pattern '(?i)(?:-- Error \d+\.|^Error \d+\.|returned actual error code|Action ended .* Return value 3\.)' |
+                Select-Object -Last 8 |
+                ForEach-Object { $_.Line.Trim() })
+
+            foreach ($line in $failureLines)
+            {
+                Write-Warn "  $line"
+            }
+
+            Write-Warn "MSI log: $LogPath"
+        }
+    }
+
     function Get-InstalledPwshVersion
     {
         try
@@ -1001,65 +1118,75 @@ function Invoke-PwshUpstallWindows
             Write-Info "Upgrading PowerShell $upgradeFromVersion to $targetVersion in place via Windows Installer..."
         }
 
-        $installerPath = Join-Path -Path $dlDir -ChildPath $asset.name
-
-        if (Test-Path $installerPath)
-        {
-            Write-Verbose "Removing existing incomplete download: $installerPath"
-            Remove-Item -Force $installerPath
-        }
-
-        if ($PSCmdlet.ShouldProcess($installerPath, 'Download installer'))
-        {
-            Invoke-CompatWebRequest -Parameters @{
-                Uri = $asset.browser_download_url
-                OutFile = $installerPath
-            }
-        }
-
-        # Verify SHA256 checksum
-        if (-not $SkipChecksum -and $shaAsset)
-        {
-            $shaPath = "$installerPath.sha256"
-            Write-Info 'Downloading checksum file...'
-            if ($PSCmdlet.ShouldProcess($shaPath, 'Download SHA256 checksum'))
-            {
-                Invoke-CompatWebRequest -Parameters @{
-                    Uri = $shaAsset.browser_download_url
-                    OutFile = $shaPath
-                }
-            }
-
-            Write-Info 'Verifying SHA256 checksum...'
-            $expectedSha = (Get-ExpectedSha256 -ChecksumPath $shaPath -AssetName $asset.name).ToUpperInvariant()
-            $actualSha = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToUpperInvariant()
-
-            if ($expectedSha -ne $actualSha)
-            {
-                Write-Error 'SHA256 checksum verification failed!'
-                Write-Error "  Expected: $expectedSha"
-                Write-Error "  Got:      $actualSha"
-                exit 1
-            }
-            Write-Success 'SHA256 checksum verified successfully'
-            Remove-Item -Force $shaPath
-        }
-        elseif (-not $SkipChecksum)
-        {
-            Write-Warning 'SHA256 file not found, skipping checksum verification'
-        }
+        $installerPath = Save-VerifiedAsset -Asset $asset -ShaAsset $shaAsset -DestinationDirectory $dlDir -SkipVerification:$SkipChecksum
 
         $msiArgs = "/i `"$installerPath`" /qn /norestart"
+        $safeTargetVersion = $targetVersion -replace '[^0-9A-Za-z.-]', '_'
+        $installLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeTargetVersion-install.log"
 
         if ($PSCmdlet.ShouldProcess("msiexec.exe $msiArgs", "Install/upgrade PowerShell $targetVersion"))
         {
-            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru
-            if ($proc.ExitCode -ne 0)
+            $proc = Invoke-MsiExec -Arguments $msiArgs -LogPath $installLogPath
+
+            if (-not (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode) -and
+                $upgradeFromVersion -and
+                $proc.ExitCode -eq 1603 -and
+                (Test-MsiLogForMissingSource -LogPath $installLogPath))
             {
-                Write-Error "MSI installation failed with exit code: $($proc.ExitCode)"
+                Write-Warn "The Windows Installer cache for PowerShell $upgradeFromVersion is missing (error 1612)."
+                Write-Info "Downloading PowerShell $upgradeFromVersion to rebuild the installer cache..."
+
+                $previousRelease = Get-Release -TagName $upgradeFromVersion -Arch $arch
+                $previousAssetInfo = Select-Asset -Release $previousRelease -Arch $arch
+                $previousInstallerPath = Save-VerifiedAsset `
+                    -Asset $previousAssetInfo.Asset `
+                    -ShaAsset $previousAssetInfo.ShaAsset `
+                    -DestinationDirectory $dlDir `
+                    -SkipVerification:$SkipChecksum
+
+                $safePreviousVersion = $upgradeFromVersion -replace '[^0-9A-Za-z.-]', '_'
+                $repairLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safePreviousVersion-recache.log"
+                $repairArgs = "/i `"$previousInstallerPath`" REINSTALL=ALL REINSTALLMODE=vomus /qn /norestart"
+                Write-Info "Rebuilding the PowerShell $upgradeFromVersion Windows Installer cache..."
+                $repairProc = Invoke-MsiExec -Arguments $repairArgs -LogPath $repairLogPath
+
+                if (-not (Test-MsiSuccessExitCode -ExitCode $repairProc.ExitCode))
+                {
+                    Show-MsiFailureDetails -ExitCode $repairProc.ExitCode -LogPath $repairLogPath
+                    Write-Warn "Original upgrade log: $installLogPath"
+                    exit $repairProc.ExitCode
+                }
+
+                $retryLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeTargetVersion-install-retry.log"
+                Write-Info "Installer cache rebuilt; retrying PowerShell $targetVersion..."
+                $proc = Invoke-MsiExec -Arguments $msiArgs -LogPath $retryLogPath
+                if (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode)
+                {
+                    Remove-Item -Force $installLogPath, $repairLogPath, $retryLogPath -ErrorAction SilentlyContinue
+                }
+                else
+                {
+                    Show-MsiFailureDetails -ExitCode $proc.ExitCode -LogPath $retryLogPath
+                    Write-Warn "Original upgrade log: $installLogPath"
+                    Write-Warn "Installer cache repair log: $repairLogPath"
+                    exit $proc.ExitCode
+                }
+            }
+            elseif (-not (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode))
+            {
+                Show-MsiFailureDetails -ExitCode $proc.ExitCode -LogPath $installLogPath
                 exit $proc.ExitCode
             }
-            Write-Success "PowerShell $targetVersion installed successfully"
+
+            Remove-Item -Force $installLogPath -ErrorAction SilentlyContinue
+            if ($proc.ExitCode -in @(1641, 3010))
+            {
+                Write-Warn "PowerShell $targetVersion installed successfully; Windows Installer requested a reboot (exit code $($proc.ExitCode))."
+            }
+            else
+            {
+                Write-Success "PowerShell $targetVersion installed successfully"
+            }
         }
     }
     finally

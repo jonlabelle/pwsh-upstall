@@ -209,7 +209,7 @@ sh ./pwsh-upstall-linux.sh
 - **Insufficient disk space**: Free at least 500 MB and rerun the script.
 - **Permission denied**: Run with `sudo` on Linux/macOS or as Administrator on Windows.
 - **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead.
-- **Windows Installer error 1612**: The cached MSI source is unavailable. Upgrades install the newer MSI directly; for standalone uninstall failures, reinstall the same PowerShell version and retry `-Uninstall`.
+- **Windows Installer errors 1603/1612**: A missing cached MSI can make an upgrade return 1603 while removing the old release. The Windows script detects this condition, downloads and verifies the installed release's MSI, rebuilds the installer cache, and retries. Other MSI failures retain a verbose log under `%TEMP%\pwsh-upstall-*.log`.
 - **Windows options with one-liners**: Download the script and run it with `powershell -File .\pwsh-upstall-windows.ps1 ...`.
 
 ## License
