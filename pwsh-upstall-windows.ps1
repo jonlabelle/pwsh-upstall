@@ -709,7 +709,40 @@ function Invoke-PwshUpstallWindows
 
         if (Test-Path $installerPath)
         {
-            Write-Verbose "Removing existing incomplete download: $installerPath"
+            if (-not $SkipVerification -and $ShaAsset)
+            {
+                $shaPath = "$installerPath.sha256"
+                Write-Info 'Downloading checksum file...'
+                if ($PSCmdlet.ShouldProcess($shaPath, 'Download SHA256 checksum'))
+                {
+                    $null = Invoke-CompatWebRequest -Parameters @{
+                        Uri = $ShaAsset.browser_download_url
+                        OutFile = $shaPath
+                    }
+                }
+
+                Write-Info 'Verifying existing installer SHA256 checksum...'
+                $expectedSha = (Get-ExpectedSha256 -ChecksumPath $shaPath -AssetName $Asset.name).ToUpperInvariant()
+                $actualSha = (Get-FileHash -Path $installerPath -Algorithm SHA256).Hash.ToUpperInvariant()
+                Remove-Item -Force $shaPath -ErrorAction SilentlyContinue
+
+                if ($expectedSha -eq $actualSha)
+                {
+                    Write-Success 'Existing installer SHA256 checksum verified successfully'
+                    return $installerPath
+                }
+
+                Write-Warning "Existing installer checksum mismatch, downloading a fresh copy: $installerPath"
+            }
+            elseif ($SkipVerification)
+            {
+                Write-Verbose "Removing existing installer before download because checksum verification is disabled: $installerPath"
+            }
+            else
+            {
+                Write-Verbose "Removing existing installer because no checksum is available: $installerPath"
+            }
+
             Remove-Item -Force $installerPath
         }
 

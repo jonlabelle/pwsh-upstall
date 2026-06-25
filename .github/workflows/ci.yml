@@ -249,7 +249,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
-          .\pwsh-upstall-windows.ps1 -Force -Verbose
+          $installerDir = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'pwsh-upstall-install-source'
+          New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
+          "PWSH_UPSTALL_INSTALL_SOURCE_DIR=$installerDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          .\pwsh-upstall-windows.ps1 -Force -OutDir $installerDir -Verbose
 
       - name: Verify installation
         shell: powershell
@@ -267,14 +270,210 @@ jobs:
             Write-Host "OS: $($PSVersionTable.OS)"
           '
 
-      - name: Uninstall PowerShell
+      - name: Break PowerShell MSI cache
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Continue'
-          Set-StrictMode -Off
-          .\pwsh-upstall-windows.ps1 -Uninstall -Verbose
-          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
-            Write-Host "Uninstall completed with warnings (exit code: $LASTEXITCODE)"
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          Add-Type -TypeDefinition @'
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Text;
+
+          public static class PwshUpstallMsi
+          {
+              [DllImport("msi.dll", CharSet = CharSet.Unicode)]
+              public static extern int MsiGetProductInfo(string product, string property, StringBuilder valueBuf, ref int valueBufSize);
+          }
+          '@
+
+          function Get-MsiProductInfoValue {
+            param(
+              [Parameter(Mandatory = $true)][string]$ProductCode,
+              [Parameter(Mandatory = $true)][string]$Property
+            )
+
+            $capacity = 512
+            while ($true) {
+              $length = $capacity
+              $buffer = New-Object System.Text.StringBuilder ($capacity + 1)
+              $result = [PwshUpstallMsi]::MsiGetProductInfo($ProductCode, $Property, $buffer, [ref]$length)
+
+              if ($result -eq 0) {
+                return $buffer.ToString()
+              }
+
+              if ($result -eq 234) {
+                $capacity = $length + 1
+                continue
+              }
+
+              throw "MsiGetProductInfo failed for $ProductCode property $Property with error $result."
+            }
+          }
+
+          function Get-PwshMsiProduct {
+            $uninstallRoots = @(
+              'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+              'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+            )
+
+            foreach ($root in $uninstallRoots) {
+              if (-not (Test-Path -LiteralPath $root)) {
+                continue
+              }
+
+              foreach ($key in Get-ChildItem -LiteralPath $root) {
+                $item = Get-ItemProperty -LiteralPath $key.PSPath
+                $displayNameProperty = $item.PSObject.Properties['DisplayName']
+                $windowsInstallerProperty = $item.PSObject.Properties['WindowsInstaller']
+                $displayName = if ($displayNameProperty) { [string]$displayNameProperty.Value } else { '' }
+                $windowsInstaller = if ($windowsInstallerProperty) { [int]$windowsInstallerProperty.Value } else { 0 }
+
+                if ($windowsInstaller -eq 1 -and
+                    $displayName -notmatch 'x86' -and
+                    ($displayName -match '^PowerShell 7' -or ($displayName -match '^PowerShell\b' -and $displayName -match 'x64|arm64|7')) -and
+                    $key.PSChildName -match '^\{[0-9A-Fa-f-]{36}\}$') {
+                  return [PSCustomObject]@{
+                    ProductCode = $key.PSChildName
+                    DisplayName = $displayName
+                  }
+                }
+              }
+            }
+
+            return $null
+          }
+
+          function Clear-PwshMsiSourceList {
+            param([Parameter(Mandatory = $true)][string]$LocalPackage)
+
+            $productsRoot = 'HKLM:\SOFTWARE\Classes\Installer\Products'
+            if (-not (Test-Path -LiteralPath $productsRoot)) {
+              return $null
+            }
+
+            foreach ($key in Get-ChildItem -LiteralPath $productsRoot) {
+              $item = Get-ItemProperty -LiteralPath $key.PSPath
+              $localPackageProperty = $item.PSObject.Properties['LocalPackage']
+              if (-not $localPackageProperty -or [string]$localPackageProperty.Value -ine $LocalPackage) {
+                continue
+              }
+
+              $sourceListPath = Join-Path -Path $key.PSPath -ChildPath 'SourceList'
+              if (Test-Path -LiteralPath $sourceListPath) {
+                foreach ($child in Get-ChildItem -LiteralPath $sourceListPath -ErrorAction SilentlyContinue) {
+                  Remove-Item -LiteralPath $child.PSPath -Recurse -Force
+                }
+
+                foreach ($propertyName in @('LastUsedSource', 'PackageName')) {
+                  Remove-ItemProperty -LiteralPath $sourceListPath -Name $propertyName -ErrorAction SilentlyContinue
+                }
+              }
+
+              return $sourceListPath
+            }
+
+            return $null
+          }
+
+          $product = Get-PwshMsiProduct
+          if (-not $product) {
+            throw 'Could not find an MSI-installed PowerShell product to corrupt for the cache repair regression.'
+          }
+
+          $installSourceDir = $env:PWSH_UPSTALL_INSTALL_SOURCE_DIR
+          if (-not $installSourceDir -or -not (Test-Path -LiteralPath $installSourceDir)) {
+            throw "PowerShell install source directory was not found: $installSourceDir"
+          }
+
+          $repairSourceDir = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'pwsh-upstall-repair-source'
+          New-Item -ItemType Directory -Force -Path $repairSourceDir | Out-Null
+
+          $installer = Get-ChildItem -LiteralPath $installSourceDir -Filter '*.msi' | Select-Object -First 1
+          if (-not $installer) {
+            throw "PowerShell installer was not found in install source directory: $installSourceDir"
+          }
+
+          Move-Item -LiteralPath $installer.FullName -Destination (Join-Path -Path $repairSourceDir -ChildPath $installer.Name) -Force
+          Remove-Item -LiteralPath $installSourceDir -Recurse -Force
+          "PWSH_UPSTALL_INSTALLER_DIR=$repairSourceDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $localPackage = Get-MsiProductInfoValue -ProductCode $product.ProductCode -Property 'LocalPackage'
+          if (-not $localPackage -or -not (Test-Path -LiteralPath $localPackage -PathType Leaf)) {
+            throw "PowerShell MSI LocalPackage was not found: $localPackage"
+          }
+
+          $sourceListPath = Clear-PwshMsiSourceList -LocalPackage $localPackage
+
+          $missingPackage = "$localPackage.missing"
+          Remove-Item -LiteralPath $missingPackage -Force -ErrorAction SilentlyContinue
+          Move-Item -LiteralPath $localPackage -Destination $missingPackage -Force
+
+          if (Test-Path -LiteralPath $localPackage) {
+            throw "Failed to remove PowerShell MSI LocalPackage: $localPackage"
+          }
+
+          Write-Host "Moved $($product.DisplayName) cached MSI to trigger Windows Installer source error 1612:"
+          Write-Host "  ProductCode: $($product.ProductCode)"
+          Write-Host "  LocalPackage: $localPackage"
+          Write-Host "  MovedTo: $missingPackage"
+          Write-Host "  ClearedSourceList: $sourceListPath"
+          Write-Host "  RepairSource: $repairSourceDir"
+
+      - name: Uninstall PowerShell through MSI cache repair path
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $stdoutLog = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'pwsh-upstall-uninstall-stdout.log'
+          $stderrLog = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'pwsh-upstall-uninstall-stderr.log'
+          Remove-Item -LiteralPath $stdoutLog, $stderrLog -Force -ErrorAction SilentlyContinue
+
+          $scriptPath = Join-Path -Path $PWD -ChildPath 'pwsh-upstall-windows.ps1'
+          $installerDir = if ($env:PWSH_UPSTALL_INSTALLER_DIR) {
+            $env:PWSH_UPSTALL_INSTALLER_DIR
+          } else {
+            Join-Path -Path $env:RUNNER_TEMP -ChildPath 'pwsh-upstall-msi'
+          }
+
+          $process = Start-Process -FilePath powershell.exe -ArgumentList @(
+            '-NoLogo',
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $scriptPath,
+            '-Uninstall',
+            '-OutDir',
+            $installerDir,
+            '-Verbose'
+          ) -Wait -PassThru -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
+
+          $outputParts = @()
+          if (Test-Path -LiteralPath $stdoutLog) {
+            $outputParts += Get-Content -LiteralPath $stdoutLog -Raw
+          }
+          if (Test-Path -LiteralPath $stderrLog) {
+            $outputParts += Get-Content -LiteralPath $stderrLog -Raw
+          }
+          $output = $outputParts -join [Environment]::NewLine
+          Write-Host $output
+
+          if ($process.ExitCode -ne 0) {
+            throw "PowerShell uninstall failed with exit code $($process.ExitCode)."
+          }
+
+          if ($output -notmatch 'Windows Installer cache for PowerShell .+ is missing \(error 1612\)') {
+            throw 'The uninstall path did not detect the missing Windows Installer source condition.'
+          }
+
+          if ($output -notmatch 'Installer cache rebuilt; retrying PowerShell uninstall') {
+            throw 'The uninstall path did not rebuild the Windows Installer cache before retrying.'
           }
 
       - name: Verify uninstallation

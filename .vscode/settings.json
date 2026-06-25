@@ -30,6 +30,7 @@
     "msiexec",
     "noninteractive",
     "norestart",
+    "notmatch",
     "pacman",
     "pipefail",
     "pkgnames",
