@@ -242,7 +242,7 @@ jobs:
           Set-StrictMode -Version Latest
           .\pwsh-upstall-windows.ps1 -WhatIf -Verbose
 
-      - name: Install PowerShell
+      - name: Install PowerShell 7.6 (MSI)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: powershell
@@ -252,7 +252,8 @@ jobs:
           $installerDir = Join-Path -Path $env:RUNNER_TEMP -ChildPath 'pwsh-upstall-install-source'
           New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
           "PWSH_UPSTALL_INSTALL_SOURCE_DIR=$installerDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          .\pwsh-upstall-windows.ps1 -Force -OutDir $installerDir -Verbose
+          # 7.6.x is the last release line that ships MSI packages.
+          .\pwsh-upstall-windows.ps1 -Tag v7.6 -Force -OutDir $installerDir -Verbose
 
       - name: Verify installation
         shell: powershell
@@ -500,6 +501,87 @@ jobs:
           } else {
             Write-Host "PowerShell uninstalled successfully (pwsh command not found)"
           }
+
+      - name: Install PowerShell 7.6 (MSI) for ZIP upgrade test
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          .\pwsh-upstall-windows.ps1 -Tag v7.6 -Force -Verbose
+
+      - name: Upgrade to latest PowerShell (ZIP)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          .\pwsh-upstall-windows.ps1 -Force -Verbose
+
+      - name: Verify ZIP installation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $installDir = Join-Path -Path $env:ProgramFiles -ChildPath 'PowerShell\7'
+          $pwshExe = Join-Path -Path $installDir -ChildPath 'pwsh.exe'
+          if (-not (Test-Path -LiteralPath $pwshExe -PathType Leaf)) {
+            throw "pwsh.exe not found at $pwshExe"
+          }
+
+          $version = & $pwshExe -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          Write-Host "Installed PowerShell version: $version"
+          if ([version]($version -replace '-.*$', '') -lt [version]'7.7.0') {
+            throw "Expected PowerShell 7.7.0 or later, got $version"
+          }
+
+          $msiEntries = @(Get-ChildItem -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall' |
+            Get-ItemProperty |
+            Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -match '^PowerShell 7' -and $_.DisplayName -notmatch 'preview|x86' })
+          if ($msiEntries) {
+            throw "MSI PowerShell install still registered: $($msiEntries.DisplayName -join ', ')"
+          }
+
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          if (-not (@($machinePath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $installDir }).Count)) {
+            throw "Machine PATH does not contain $installDir"
+          }
+
+          if (-not (Test-Path -LiteralPath 'HKLM:\SOFTWARE\pwsh-upstall\ZipInstalls\7')) {
+            throw 'pwsh-upstall ZIP install record was not created.'
+          }
+
+      - name: Uninstall PowerShell (ZIP)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          .\pwsh-upstall-windows.ps1 -Uninstall -Verbose
+
+      - name: Verify ZIP uninstallation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $installDir = Join-Path -Path $env:ProgramFiles -ChildPath 'PowerShell\7'
+          if (Test-Path -LiteralPath $installDir) {
+            throw "Install directory still exists: $installDir"
+          }
+
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          if (@($machinePath -split ';' | Where-Object { $_.TrimEnd('\') -ieq $installDir }).Count) {
+            throw "Machine PATH still contains $installDir"
+          }
+
+          if (Test-Path -LiteralPath 'HKLM:\SOFTWARE\pwsh-upstall') {
+            throw 'pwsh-upstall ZIP install record was not removed.'
+          }
+
+          Write-Host 'ZIP-based PowerShell uninstalled successfully'
 
       - name: Upload logs on failure
         if: failure()

@@ -4,7 +4,13 @@
 
     .DESCRIPTION
         PowerShell Desktop script to install, upgrade, or uninstall Microsoft PowerShell (Core) on Windows
-        using official MSI packages from GitHub Releases. Supports both x86_64 and ARM64 architectures.
+        using official packages from GitHub Releases. Supports both x86_64 and ARM64 architectures.
+
+        Releases that ship an MSI package (PowerShell 7.6.x and earlier) are installed with the MSI.
+        Starting with PowerShell 7.7, Microsoft no longer publishes MSI packages, so those releases are
+        installed machine-wide from the official ZIP package into the same location the MSI used
+        (%ProgramFiles%\PowerShell\<major>) and added to the machine PATH. An existing MSI installation
+        is removed first so the two do not conflict.
 
         IMPORTANT: Run this script from Windows PowerShell (powershell.exe), not PowerShell Core (pwsh.exe),
         to avoid process-in-use errors when upgrading an existing PowerShell Core installation.
@@ -21,11 +27,11 @@
         Prereleases are supported only via explicit exact tag.
 
     .PARAMETER OutDir
-        Save the downloaded MSI installer to the specified directory.
+        Save the downloaded MSI or ZIP package to the specified directory.
         If omitted, uses a temporary directory.
 
     .PARAMETER Keep
-        Retain the MSI installer after installation.
+        Retain the downloaded MSI or ZIP package after installation.
         By default, the installer is deleted unless -OutDir is specified.
 
     .PARAMETER Force
@@ -35,8 +41,9 @@
         Only check if the installed version is up to date with the latest available release.
 
     .PARAMETER Uninstall
-        Remove PowerShell using the MSI uninstall string from the Windows registry.
-        If the cached installer source is missing, rebuild the cache and retry.
+        Remove PowerShell. ZIP-based installs made by this script are removed from disk and the
+        machine PATH. MSI installs are removed using the MSI uninstall string from the Windows
+        registry; if the cached installer source is missing, the cache is rebuilt and the uninstall retried.
 
     .PARAMETER SkipChecksum
         Skip SHA256 checksum verification (not recommended).
@@ -96,12 +103,13 @@
         The script automatically:
 
         - Detects system architecture (x64 or ARM64)
-        - Downloads MSI installer from GitHub Releases
+        - Downloads the MSI installer (7.6.x and earlier) or ZIP package (7.7+) from GitHub Releases
         - Verifies SHA256 checksums
-        - Performs silent installation with msiexec
+        - Performs silent installation with msiexec, or extracts the ZIP package and updates the machine PATH
         - Validates disk space before installation
         - Uses semantic version comparison to detect upgrades
-        - Lets Windows Installer replace the older stable MSI version during upgrade
+        - Lets Windows Installer replace the older stable MSI version during MSI upgrades
+        - Removes an existing MSI installation before switching to a ZIP-based install
 
         Default behavior downloads the latest stable release (not preview/RC).
         Prereleases are supported only via explicit exact tag
@@ -394,13 +402,20 @@ function Invoke-PwshUpstallWindows
         {
             '^(AMD64|X86_64)$' { return 'x64' }
             '^ARM64$' { return 'arm64' }
-            '^X86$' { throw '32-bit x86 Windows is not supported by PowerShell MSI releases.' }
+            '^X86$' { throw '32-bit x86 Windows is not supported by this script.' }
             default { throw "Unsupported architecture: $arch" }
         }
     }
 
     function Get-PwshUninstallInfo
     {
+        param(
+            [int]$Major = 0,
+            [ValidateSet('Any', 'Stable', 'Preview')]
+            [string]$Channel = 'Any',
+            [switch]$WindowsInstallerOnly
+        )
+
         $uninstallSubKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
 
         foreach ($view in Get-RegistryViews)
@@ -443,6 +458,11 @@ function Invoke-PwshUpstallWindows
 
                         if ($isSupportedPwshInstall)
                         {
+                            if ($Major -gt 0 -and $displayName -notmatch "^PowerShell $Major(?:\D|$)") { continue }
+                            if ($Channel -eq 'Stable' -and $displayName -match 'preview') { continue }
+                            if ($Channel -eq 'Preview' -and $displayName -notmatch 'preview') { continue }
+                            if ($WindowsInstallerOnly -and -not $productCode) { continue }
+
                             if ($uninstallString -or $quietUninstallString -or $productCode)
                             {
                                 return [PSCustomObject]@{
@@ -534,7 +554,8 @@ function Invoke-PwshUpstallWindows
             [string]$Arch
         )
 
-        $suffix = "win-$Arch.msi"
+        $suffixes = @("win-$Arch.msi", "win-$Arch.zip")
+        $suffixText = $suffixes -join ' or '
         $selectorText = $SelectorParts -join '.'
         $releases = @(Invoke-GitHubApi -Url "$apiBase/releases?per_page=100")
         $matching = @()
@@ -570,7 +591,10 @@ function Invoke-PwshUpstallWindows
                 continue
             }
 
-            $hasAsset = @($release.assets | Where-Object { $_.browser_download_url -like "*$suffix" }).Count -gt 0
+            $hasAsset = @($release.assets | Where-Object {
+                    $url = $_.browser_download_url
+                    @($suffixes | Where-Object { $url -like "*$_" }).Count -gt 0
+                }).Count -gt 0
             if (-not $hasAsset)
             {
                 continue
@@ -584,7 +608,7 @@ function Invoke-PwshUpstallWindows
 
         if (-not $matching)
         {
-            throw "Could not find a stable release matching selector [$selectorText] with a $suffix asset."
+            throw "Could not find a stable release matching selector [$selectorText] with a $suffixText asset."
         }
 
         return ($matching | Sort-Object -Property Version -Descending | Select-Object -First 1).Release
@@ -622,14 +646,32 @@ function Invoke-PwshUpstallWindows
     {
         param(
             $Release,
-            [string]$Arch
+            [string]$Arch,
+            # Auto prefers the MSI and falls back to the ZIP package for releases without an MSI (7.7+).
+            [ValidateSet('Auto', 'Msi')]
+            [string]$InstallerType = 'Auto'
         )
 
-        $suffix = "win-$Arch.msi"
-        $candidates = @($Release.assets | Where-Object { $_.browser_download_url -like "*$suffix" })
+        $installerTypes = if ($InstallerType -eq 'Msi') { @('msi') } else { @('msi', 'zip') }
+        $candidates = @()
+        $suffix = $null
+        $selectedType = $null
+
+        foreach ($type in $installerTypes)
+        {
+            $suffix = "win-$Arch.$type"
+            $candidates = @($Release.assets | Where-Object { $_.browser_download_url -like "*$suffix" })
+            if ($candidates)
+            {
+                $selectedType = $type
+                break
+            }
+        }
+
         if (-not $candidates)
         {
-            throw "Could not find a $suffix asset in release [$($Release.tag_name)]."
+            $wanted = ($installerTypes | ForEach-Object { "win-$Arch.$_" }) -join ' or '
+            throw "Could not find a $wanted asset in release [$($Release.tag_name)]."
         }
 
         $selected = $candidates |
@@ -655,6 +697,7 @@ function Invoke-PwshUpstallWindows
         return [PSCustomObject]@{
             Asset = $selected
             ShaAsset = $shaAsset
+            InstallerType = $selectedType
         }
     }
 
@@ -799,7 +842,7 @@ function Invoke-PwshUpstallWindows
         )
 
         $release = Get-Release -TagName $Version -Arch $Arch
-        $assetInfo = Select-Asset -Release $release -Arch $Arch
+        $assetInfo = Select-Asset -Release $release -Arch $Arch -InstallerType Msi
 
         return Save-VerifiedAsset `
             -Asset $assetInfo.Asset `
@@ -1076,87 +1119,383 @@ function Invoke-PwshUpstallWindows
         }
     }
 
-    $arch = Get-OsArch
-    Write-Verbose "Detected architecture: $arch"
-
-    if ($Check)
+    function Open-LocalMachineRegistryKey
     {
-        Write-Info 'Checking network connectivity...'
-        if (-not (Test-NetworkConnectivity))
+        $view = if ([Environment]::Is64BitOperatingSystem)
         {
-            exit 1
-        }
-
-        $release = Get-Release -TagName $null -Arch $arch
-        $null = Select-Asset -Release $release -Arch $arch
-
-        $releaseTag = $release.tag_name
-        $latestVersion = Remove-VersionPrefix -Value $releaseTag
-
-        if (-not $latestVersion)
-        {
-            Write-Error 'Could not determine latest PowerShell release tag.'
-            exit 1
-        }
-
-        $installed = Get-InstalledPwshVersion
-        if (-not $installed)
-        {
-            Write-Warn "PowerShell is not installed. Latest available: $latestVersion"
-            exit 2
-        }
-
-        $cmp = Compare-SemanticVersion -Version1 $installed -Version2 $latestVersion
-        if ($cmp -eq 0)
-        {
-            Write-Success "PowerShell $installed is up to date (latest: $latestVersion)."
-            exit 0
-        }
-        elseif ($cmp -lt 0)
-        {
-            Write-Warn "Update available: installed $installed -> latest $latestVersion."
-            exit 1
+            [Microsoft.Win32.RegistryView]::Registry64
         }
         else
         {
-            Write-Warn "Installed version $installed is newer than latest release $latestVersion."
-            exit 0
+            [Microsoft.Win32.RegistryView]::Default
         }
+
+        return [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $view)
     }
 
-    # Warn if running from pwsh (PowerShell Core) when trying to upgrade
-    if (-not $Uninstall)
+    function Get-ProgramFilesDirectory
     {
-        $currentShell = (Get-Process -Id $PID).ProcessName
-        if ($currentShell -eq 'pwsh')
+        # Use the native Program Files directory even when running in 32-bit Windows PowerShell.
+        if ($env:ProgramW6432)
         {
-            $installedVersion = Get-InstalledPwshVersion
-            if ($installedVersion)
+            return $env:ProgramW6432
+        }
+
+        return $env:ProgramFiles
+    }
+
+    function Get-PwshInstallDirectoryName
+    {
+        param([Parameter(Mandatory = $true)][string]$Version)
+
+        $versionMatch = [regex]::Match((Remove-VersionPrefix -Value $Version), '^(\d+)\.\d+\.\d+(-.+)?$')
+        if (-not $versionMatch.Success)
+        {
+            throw "Could not determine the install directory for PowerShell version [$Version]."
+        }
+
+        # Mirror the MSI layout: stable releases use <major>, prereleases use <major>-preview.
+        $name = $versionMatch.Groups[1].Value
+        if ($versionMatch.Groups[2].Success)
+        {
+            $name += '-preview'
+        }
+
+        return $name
+    }
+
+    function Get-PwshZipInstallDirectory
+    {
+        param([Parameter(Mandatory = $true)][string]$Version)
+
+        $powerShellRoot = Join-Path -Path (Get-ProgramFilesDirectory) -ChildPath 'PowerShell'
+        return Join-Path -Path $powerShellRoot -ChildPath (Get-PwshInstallDirectoryName -Version $Version)
+    }
+
+    function Get-PwshZipInstallRecord
+    {
+        $records = @()
+        $baseKey = $null
+        $rootKey = $null
+
+        try
+        {
+            $baseKey = Open-LocalMachineRegistryKey
+            $rootKey = $baseKey.OpenSubKey($script:PwshUpstallZipInstallsSubKey)
+            if ($rootKey)
             {
-                Write-Warning 'You are running this script from PowerShell Core (pwsh.exe).'
-                Write-Warning "The MSI installer may fail with 'process in use' errors when upgrading."
-                Write-Warning 'For best results, run this script from Windows PowerShell (powershell.exe):'
-                Write-Warning '  powershell -File .\pwsh-upstall-windows.ps1'
-                Write-Host ''
-                Start-Sleep -Seconds 3
+                foreach ($name in $rootKey.GetSubKeyNames())
+                {
+                    $itemKey = $rootKey.OpenSubKey($name)
+                    if ($null -eq $itemKey) { continue }
+
+                    try
+                    {
+                        $installLocation = [string]$itemKey.GetValue('InstallLocation')
+                        if ($installLocation)
+                        {
+                            $records += [PSCustomObject]@{
+                                Name = $name
+                                InstallLocation = $installLocation
+                                Version = [string]$itemKey.GetValue('Version')
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        $itemKey.Close()
+                    }
+                }
             }
         }
+        catch
+        {
+            Write-Verbose "Failed to read pwsh-upstall ZIP install records: $_"
+        }
+        finally
+        {
+            if ($rootKey) { $rootKey.Close() }
+            if ($baseKey) { $baseKey.Close() }
+        }
+
+        # Prefer stable installs over preview installs.
+        return @($records | Sort-Object -Property @{ Expression = { $_.Name -match 'preview' } }, Name)
     }
 
-    if ($Uninstall)
+    function Set-PwshZipInstallRecord
     {
-        $info = Get-PwshUninstallInfo
-        if (-not $info -or -not $info.DisplayName -or (-not $info.UninstallString -and -not $info.QuietUninstallString -and -not $info.ProductCode))
+        param(
+            [Parameter(Mandatory = $true)][string]$InstallDirectory,
+            [Parameter(Mandatory = $true)][string]$Version,
+            [Parameter(Mandatory = $true)][string]$Arch
+        )
+
+        $name = Split-Path -Path $InstallDirectory -Leaf
+        $baseKey = $null
+        $itemKey = $null
+
+        try
         {
-            Write-Warn 'No PowerShell install found via MSI uninstall entries.'
-            return
+            $baseKey = Open-LocalMachineRegistryKey
+            $itemKey = $baseKey.CreateSubKey("$script:PwshUpstallZipInstallsSubKey\$name")
+            $itemKey.SetValue('InstallLocation', $InstallDirectory)
+            $itemKey.SetValue('Version', $Version)
+            $itemKey.SetValue('Arch', $Arch)
         }
-        Write-Info "Found PowerShell install: $($info.DisplayName)"
-        $uninstallCommand = Get-PwshUninstallCommand -Info $info
-        $isMsiUninstall = $uninstallCommand.FilePath -eq 'msiexec.exe'
-        $logVersion = if ($info.DisplayVersion)
+        finally
         {
-            Get-NormalizedPwshReleaseVersion -Value ([string]$info.DisplayVersion)
+            if ($itemKey) { $itemKey.Close() }
+            if ($baseKey) { $baseKey.Close() }
+        }
+    }
+
+    function Remove-PwshZipInstallRecord
+    {
+        param([Parameter(Mandatory = $true)][string]$Name)
+
+        $baseKey = $null
+        $rootKey = $null
+
+        try
+        {
+            $baseKey = Open-LocalMachineRegistryKey
+            $rootKey = $baseKey.OpenSubKey($script:PwshUpstallZipInstallsSubKey, $true)
+            if ($null -eq $rootKey)
+            {
+                return
+            }
+
+            $rootKey.DeleteSubKeyTree($Name, $false)
+            $remaining = $rootKey.SubKeyCount
+            $rootKey.Close()
+            $rootKey = $null
+
+            if ($remaining -eq 0)
+            {
+                $baseKey.DeleteSubKeyTree((Split-Path -Path $script:PwshUpstallZipInstallsSubKey -Parent), $false)
+            }
+        }
+        finally
+        {
+            if ($rootKey) { $rootKey.Close() }
+            if ($baseKey) { $baseKey.Close() }
+        }
+    }
+
+    function Send-EnvironmentChangeNotification
+    {
+        try
+        {
+            if (-not ('PwshUpstall.NativeMethods' -as [type]))
+            {
+                Add-Type -Namespace PwshUpstall -Name NativeMethods -MemberDefinition @'
+[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+'@
+            }
+
+            # HWND_BROADCAST, WM_SETTINGCHANGE, SMTO_ABORTIFHUNG
+            $result = [UIntPtr]::Zero
+            $null = [PwshUpstall.NativeMethods]::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$result)
+        }
+        catch
+        {
+            Write-Verbose "Could not broadcast environment change notification: $_"
+        }
+    }
+
+    function Update-MachinePathEntry
+    {
+        param(
+            [Parameter(Mandatory = $true)][string]$Directory,
+            [switch]$Remove
+        )
+
+        $target = $Directory.TrimEnd('\')
+        $isTargetEntry = {
+            param([string]$Entry)
+            [Environment]::ExpandEnvironmentVariables($Entry).Trim().TrimEnd('\') -ieq $target
+        }
+
+        $environmentSubKey = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+        $baseKey = $null
+        $environmentKey = $null
+        $changed = $false
+
+        try
+        {
+            $baseKey = Open-LocalMachineRegistryKey
+            $environmentKey = $baseKey.OpenSubKey($environmentSubKey, $true)
+
+            # Read the raw value so entries like %SystemRoot% are preserved, and write it back as REG_EXPAND_SZ.
+            $currentPath = [string]$environmentKey.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+            $entries = @($currentPath -split ';' | Where-Object { $_ })
+            $hasTarget = @($entries | Where-Object { & $isTargetEntry $_ }).Count -gt 0
+
+            if ($Remove -and $hasTarget)
+            {
+                $entries = @($entries | Where-Object { -not (& $isTargetEntry $_) })
+                $changed = $true
+            }
+            elseif (-not $Remove -and -not $hasTarget)
+            {
+                $entries += $target
+                $changed = $true
+            }
+
+            if ($changed)
+            {
+                $environmentKey.SetValue('Path', ($entries -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+            }
+        }
+        finally
+        {
+            if ($environmentKey) { $environmentKey.Close() }
+            if ($baseKey) { $baseKey.Close() }
+        }
+
+        $processEntries = @($env:Path -split ';' | Where-Object { $_ -and -not (& $isTargetEntry $_) })
+        if (-not $Remove)
+        {
+            $processEntries += $target
+        }
+        $env:Path = $processEntries -join ';'
+
+        if ($changed)
+        {
+            Send-EnvironmentChangeNotification
+        }
+    }
+
+    function Assert-NoProcessRunningFromDirectory
+    {
+        param([Parameter(Mandatory = $true)][string]$Directory)
+
+        $prefix = $Directory.TrimEnd('\') + '\'
+        $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+                $processPath = $null
+                try { $processPath = $_.Path } catch { }
+                $processPath -and $processPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+            })
+
+        if ($running)
+        {
+            $processList = ($running | ForEach-Object { "$($_.ProcessName) (PID $($_.Id))" }) -join ', '
+            throw "Close the following processes running from [$Directory] and try again: $processList. Run this script from Windows PowerShell (powershell.exe)."
+        }
+    }
+
+    function Install-PwshZipPackage
+    {
+        param(
+            [Parameter(Mandatory = $true)][string]$ZipPath,
+            [Parameter(Mandatory = $true)][string]$InstallDirectory,
+            [Parameter(Mandatory = $true)][string]$Version,
+            [Parameter(Mandatory = $true)][string]$Arch
+        )
+
+        $stagingDirectory = "$InstallDirectory.pwsh-upstall-new"
+        $backupDirectory = "$InstallDirectory.pwsh-upstall-old"
+
+        New-Item -ItemType Directory -Force -Path (Split-Path -Path $InstallDirectory -Parent) | Out-Null
+        foreach ($leftover in @($stagingDirectory, $backupDirectory))
+        {
+            if (Test-Path -LiteralPath $leftover)
+            {
+                Remove-Item -LiteralPath $leftover -Recurse -Force
+            }
+        }
+
+        Write-Info "Extracting $(Split-Path -Path $ZipPath -Leaf)..."
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $stagingDirectory)
+
+        if (-not (Test-Path -LiteralPath (Join-Path -Path $stagingDirectory -ChildPath 'pwsh.exe') -PathType Leaf))
+        {
+            Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue
+            throw "The package [$ZipPath] does not contain pwsh.exe."
+        }
+
+        # Swap directories so a failed install leaves the previous files in place.
+        $hadExisting = Test-Path -LiteralPath $InstallDirectory
+        if ($hadExisting)
+        {
+            try
+            {
+                Move-Item -LiteralPath $InstallDirectory -Destination $backupDirectory -ErrorAction Stop
+            }
+            catch
+            {
+                Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue
+                throw "Could not replace [$InstallDirectory]; make sure no PowerShell processes are using it. $_"
+            }
+        }
+
+        try
+        {
+            Move-Item -LiteralPath $stagingDirectory -Destination $InstallDirectory -ErrorAction Stop
+        }
+        catch
+        {
+            if ($hadExisting)
+            {
+                Move-Item -LiteralPath $backupDirectory -Destination $InstallDirectory -ErrorAction SilentlyContinue
+            }
+            Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue
+            throw
+        }
+
+        if ($hadExisting)
+        {
+            Remove-Item -LiteralPath $backupDirectory -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $backupDirectory)
+            {
+                Write-Warn "Could not fully remove previous PowerShell files: $backupDirectory"
+            }
+        }
+
+        Update-MachinePathEntry -Directory $InstallDirectory
+        Set-PwshZipInstallRecord -InstallDirectory $InstallDirectory -Version $Version -Arch $Arch
+    }
+
+    function Uninstall-PwshZipInstall
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            $Record,
+            [switch]$SkipUserDirNotice
+        )
+
+        Assert-NoProcessRunningFromDirectory -Directory $Record.InstallLocation
+
+        if (Test-Path -LiteralPath $Record.InstallLocation)
+        {
+            Remove-Item -LiteralPath $Record.InstallLocation -Recurse -Force
+        }
+
+        Update-MachinePathEntry -Directory $Record.InstallLocation -Remove
+        Remove-PwshZipInstallRecord -Name $Record.Name
+
+        if (-not $SkipUserDirNotice)
+        {
+            Show-RemainingPwshUserDirs
+        }
+    }
+
+    function Uninstall-PwshMsiInstall
+    {
+        param(
+            [Parameter(Mandatory = $true)]
+            $Info,
+            [switch]$SkipUserDirNotice
+        )
+
+        $repairResult = $null
+        $uninstallCommand = Get-PwshUninstallCommand -Info $Info
+        $isMsiUninstall = $uninstallCommand.FilePath -eq 'msiexec.exe'
+        $logVersion = if ($Info.DisplayVersion)
+        {
+            Get-NormalizedPwshReleaseVersion -Value ([string]$Info.DisplayVersion)
         }
         else
         {
@@ -1176,11 +1515,11 @@ function Invoke-PwshUpstallWindows
             $null
         }
 
-        if ($PSCmdlet.ShouldProcess($info.DisplayName, "Uninstall via $($uninstallCommand.FilePath) $($uninstallCommand.ArgumentList)"))
+        if ($PSCmdlet.ShouldProcess($Info.DisplayName, "Uninstall via $($uninstallCommand.FilePath) $($uninstallCommand.ArgumentList)"))
         {
             try
             {
-                Invoke-PwshUninstallCommand -Info $info -LogPath $uninstallLogPath
+                Invoke-PwshUninstallCommand -Info $Info -LogPath $uninstallLogPath -SkipUserDirNotice:$SkipUserDirNotice
                 if ($uninstallLogPath)
                 {
                     Remove-Item -Force $uninstallLogPath -ErrorAction SilentlyContinue
@@ -1216,7 +1555,7 @@ function Invoke-PwshUpstallWindows
                     exit 1
                 }
 
-                $repairVersion = Get-PwshMsiCacheRepairVersion -Info $info
+                $repairVersion = Get-PwshMsiCacheRepairVersion -Info $Info
                 if (-not $repairVersion)
                 {
                     Write-Error -Message 'Uninstall failed with error 1612 and the installed PowerShell version could not be determined for cache repair.' -ErrorAction Continue
@@ -1276,7 +1615,7 @@ function Invoke-PwshUpstallWindows
                     $safeRepairVersion = $repairVersion -replace '[^0-9A-Za-z.-]', '_'
                     $retryLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeRepairVersion-uninstall-retry.log"
                     Write-Info 'Installer cache rebuilt; retrying PowerShell uninstall...'
-                    Invoke-PwshUninstallCommand -Info $info -LogPath $retryLogPath
+                    Invoke-PwshUninstallCommand -Info $Info -LogPath $retryLogPath -SkipUserDirNotice:$SkipUserDirNotice
                     Remove-Item -Force $failedLogPath, $repairResult.LogPath, $retryLogPath -ErrorAction SilentlyContinue
                 }
                 catch
@@ -1306,6 +1645,107 @@ function Invoke-PwshUpstallWindows
                 }
             }
         }
+    }
+
+    $script:PwshUpstallZipInstallsSubKey = 'SOFTWARE\pwsh-upstall\ZipInstalls'
+
+    $arch = Get-OsArch
+    Write-Verbose "Detected architecture: $arch"
+
+    if ($Check)
+    {
+        Write-Info 'Checking network connectivity...'
+        if (-not (Test-NetworkConnectivity))
+        {
+            exit 1
+        }
+
+        $release = Get-Release -TagName $null -Arch $arch
+        $null = Select-Asset -Release $release -Arch $arch
+
+        $releaseTag = $release.tag_name
+        $latestVersion = Remove-VersionPrefix -Value $releaseTag
+
+        if (-not $latestVersion)
+        {
+            Write-Error 'Could not determine latest PowerShell release tag.'
+            exit 1
+        }
+
+        $installed = Get-InstalledPwshVersion
+        if (-not $installed)
+        {
+            Write-Warn "PowerShell is not installed. Latest available: $latestVersion"
+            exit 2
+        }
+
+        $cmp = Compare-SemanticVersion -Version1 $installed -Version2 $latestVersion
+        if ($cmp -eq 0)
+        {
+            Write-Success "PowerShell $installed is up to date (latest: $latestVersion)."
+            exit 0
+        }
+        elseif ($cmp -lt 0)
+        {
+            Write-Warn "Update available: installed $installed -> latest $latestVersion."
+            exit 1
+        }
+        else
+        {
+            Write-Warn "Installed version $installed is newer than latest release $latestVersion."
+            exit 0
+        }
+    }
+
+    # Warn if running from pwsh (PowerShell Core) when trying to upgrade
+    if (-not $Uninstall)
+    {
+        $currentShell = (Get-Process -Id $PID).ProcessName
+        if ($currentShell -eq 'pwsh')
+        {
+            $installedVersion = Get-InstalledPwshVersion
+            if ($installedVersion)
+            {
+                Write-Warning 'You are running this script from PowerShell Core (pwsh.exe).'
+                Write-Warning "The installer may fail with 'process in use' errors when upgrading."
+                Write-Warning 'For best results, run this script from Windows PowerShell (powershell.exe):'
+                Write-Warning '  powershell -File .\pwsh-upstall-windows.ps1'
+                Write-Host ''
+                Start-Sleep -Seconds 3
+            }
+        }
+    }
+
+    if ($Uninstall)
+    {
+        $zipRecord = @(Get-PwshZipInstallRecord) | Select-Object -First 1
+        if ($zipRecord)
+        {
+            Write-Info "Found PowerShell install: $($zipRecord.InstallLocation) ($($zipRecord.Version))"
+            if ($PSCmdlet.ShouldProcess($zipRecord.InstallLocation, 'Uninstall PowerShell (remove files and machine PATH entry)'))
+            {
+                try
+                {
+                    Uninstall-PwshZipInstall -Record $zipRecord
+                }
+                catch
+                {
+                    Write-Error $_
+                    exit 1
+                }
+                Write-Success "PowerShell $($zipRecord.Version) uninstalled successfully"
+            }
+            return
+        }
+
+        $info = Get-PwshUninstallInfo
+        if (-not $info -or -not $info.DisplayName -or (-not $info.UninstallString -and -not $info.QuietUninstallString -and -not $info.ProductCode))
+        {
+            Write-Warn 'No PowerShell install found via pwsh-upstall ZIP install records or MSI uninstall entries.'
+            return
+        }
+        Write-Info "Found PowerShell install: $($info.DisplayName)"
+        Uninstall-PwshMsiInstall -Info $info
         return
     }
 
@@ -1319,12 +1759,31 @@ function Invoke-PwshUpstallWindows
     $assetInfo = Select-Asset -Release $release -Arch $arch
     $asset = $assetInfo.Asset
     $shaAsset = $assetInfo.ShaAsset
+    $installerType = $assetInfo.InstallerType
     $releaseTag = $release.tag_name
     $targetVersion = Remove-VersionPrefix -Value $releaseTag
 
     Write-Info "Selected PowerShell release: $releaseTag"
     Write-Info "Selected installer: $($asset.name)"
     Write-Info "Download URL: $($asset.browser_download_url)"
+
+    # Installs that would occupy the same %ProgramFiles%\PowerShell\<major>[-preview] directory.
+    $targetDirectoryName = Get-PwshInstallDirectoryName -Version $targetVersion
+    $targetMajor = [int]($targetDirectoryName -replace '\D.*$', '')
+    $targetChannel = if ($targetDirectoryName -match 'preview') { 'Preview' } else { 'Stable' }
+    $zipInstallDirectory = $null
+    $conflictingMsiInfo = $null
+    $conflictingZipRecord = $null
+
+    if ($installerType -eq 'zip')
+    {
+        $zipInstallDirectory = Get-PwshZipInstallDirectory -Version $targetVersion
+        $conflictingMsiInfo = Get-PwshUninstallInfo -Major $targetMajor -Channel $targetChannel -WindowsInstallerOnly
+    }
+    else
+    {
+        $conflictingZipRecord = @(Get-PwshZipInstallRecord | Where-Object { $_.Name -ieq $targetDirectoryName }) | Select-Object -First 1
+    }
 
     $installed = Get-InstalledPwshVersion
     $versionComparison = $null
@@ -1371,10 +1830,30 @@ function Invoke-PwshUpstallWindows
         {
             Write-Host '  Would verify  : SHA256 checksum'
         }
-        Write-Host '  Would run     : msiexec.exe /i <downloaded-msi> /qn /norestart'
-        if ($upgradeFromVersion)
+        if ($installerType -eq 'zip')
         {
-            Write-Host "  Would upgrade : $upgradeFromVersion to $targetVersion in place via Windows Installer"
+            if ($conflictingMsiInfo)
+            {
+                Write-Host "  Would remove  : $($conflictingMsiInfo.DisplayName) (MSI) before installing"
+            }
+            Write-Host "  Would extract : <downloaded-zip> to $zipInstallDirectory"
+            Write-Host "  Would add     : $zipInstallDirectory to the machine PATH"
+            if ($upgradeFromVersion)
+            {
+                Write-Host "  Would upgrade : $upgradeFromVersion to $targetVersion"
+            }
+        }
+        else
+        {
+            if ($conflictingZipRecord)
+            {
+                Write-Host "  Would remove  : ZIP install at $($conflictingZipRecord.InstallLocation) before installing"
+            }
+            Write-Host '  Would run     : msiexec.exe /i <downloaded-msi> /qn /norestart'
+            if ($upgradeFromVersion)
+            {
+                Write-Host "  Would upgrade : $upgradeFromVersion to $targetVersion in place via Windows Installer"
+            }
         }
         return
     }
@@ -1395,67 +1874,99 @@ function Invoke-PwshUpstallWindows
     {
         if ($upgradeFromVersion)
         {
-            Write-Info "Upgrading PowerShell $upgradeFromVersion to $targetVersion in place via Windows Installer..."
+            $upgradeMethod = if ($installerType -eq 'zip') { 'from the ZIP package' } else { 'in place via Windows Installer' }
+            Write-Info "Upgrading PowerShell $upgradeFromVersion to $targetVersion $upgradeMethod..."
         }
 
         $installerPath = Save-VerifiedAsset -Asset $asset -ShaAsset $shaAsset -DestinationDirectory $dlDir -SkipVerification:$SkipChecksum
 
-        $msiArgs = "/i `"$installerPath`" /qn /norestart"
-        $safeTargetVersion = $targetVersion -replace '[^0-9A-Za-z.-]', '_'
-        $installLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeTargetVersion-install.log"
-
-        if ($PSCmdlet.ShouldProcess("msiexec.exe $msiArgs", "Install/upgrade PowerShell $targetVersion"))
+        if ($installerType -eq 'zip')
         {
-            $proc = Invoke-MsiExec -Arguments $msiArgs -LogPath $installLogPath
-
-            if (-not (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode) -and
-                $upgradeFromVersion -and
-                $proc.ExitCode -eq 1603 -and
-                (Test-MsiLogForMissingSource -LogPath $installLogPath))
+            if ($PSCmdlet.ShouldProcess($zipInstallDirectory, "Install/upgrade PowerShell $targetVersion from $($asset.name)"))
             {
-                Write-Warn "The Windows Installer cache for PowerShell $upgradeFromVersion is missing (error 1612)."
-                $repairResult = Repair-PwshWindowsInstallerCache `
-                    -Version $upgradeFromVersion `
-                    -Arch $arch `
-                    -DownloadDirectory $dlDir `
-                    -SkipVerification:$SkipChecksum
+                Assert-NoProcessRunningFromDirectory -Directory $zipInstallDirectory
 
-                if (-not (Test-MsiSuccessExitCode -ExitCode $repairResult.ExitCode))
+                if ($conflictingMsiInfo)
                 {
-                    Show-MsiFailureDetails -ExitCode $repairResult.ExitCode -LogPath $repairResult.LogPath
-                    Write-Warn "Original upgrade log: $installLogPath"
-                    exit $repairResult.ExitCode
+                    Write-Info "Removing $($conflictingMsiInfo.DisplayName) (MSI) before installing PowerShell $targetVersion from the ZIP package..."
+                    Uninstall-PwshMsiInstall -Info $conflictingMsiInfo -SkipUserDirNotice
+                    if (Get-PwshUninstallInfo -Major $targetMajor -Channel $targetChannel -WindowsInstallerOnly)
+                    {
+                        throw "$($conflictingMsiInfo.DisplayName) is still installed; it must be removed before PowerShell $targetVersion can be installed from the ZIP package."
+                    }
                 }
 
-                $retryLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeTargetVersion-install-retry.log"
-                Write-Info "Installer cache rebuilt; retrying PowerShell $targetVersion..."
-                $proc = Invoke-MsiExec -Arguments $msiArgs -LogPath $retryLogPath
-                if (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode)
+                Install-PwshZipPackage -ZipPath $installerPath -InstallDirectory $zipInstallDirectory -Version $targetVersion -Arch $arch
+                Write-Success "PowerShell $targetVersion installed successfully to $zipInstallDirectory"
+                Write-Info 'Open a new terminal session to pick up the updated machine PATH.'
+            }
+        }
+        else
+        {
+            if ($conflictingZipRecord -and $PSCmdlet.ShouldProcess($conflictingZipRecord.InstallLocation, "Remove ZIP-based PowerShell $($conflictingZipRecord.Version) before installing the MSI"))
+            {
+                Write-Info "Removing ZIP-based PowerShell $($conflictingZipRecord.Version) from $($conflictingZipRecord.InstallLocation) before installing the MSI..."
+                Uninstall-PwshZipInstall -Record $conflictingZipRecord -SkipUserDirNotice
+            }
+
+
+            $msiArgs = "/i `"$installerPath`" /qn /norestart"
+            $safeTargetVersion = $targetVersion -replace '[^0-9A-Za-z.-]', '_'
+            $installLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeTargetVersion-install.log"
+
+            if ($PSCmdlet.ShouldProcess("msiexec.exe $msiArgs", "Install/upgrade PowerShell $targetVersion"))
+            {
+                $proc = Invoke-MsiExec -Arguments $msiArgs -LogPath $installLogPath
+
+                if (-not (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode) -and
+                    $upgradeFromVersion -and
+                    $proc.ExitCode -eq 1603 -and
+                    (Test-MsiLogForMissingSource -LogPath $installLogPath))
                 {
-                    Remove-Item -Force $installLogPath, $repairResult.LogPath, $retryLogPath -ErrorAction SilentlyContinue
+                    Write-Warn "The Windows Installer cache for PowerShell $upgradeFromVersion is missing (error 1612)."
+                    $repairResult = Repair-PwshWindowsInstallerCache `
+                        -Version $upgradeFromVersion `
+                        -Arch $arch `
+                        -DownloadDirectory $dlDir `
+                        -SkipVerification:$SkipChecksum
+
+                    if (-not (Test-MsiSuccessExitCode -ExitCode $repairResult.ExitCode))
+                    {
+                        Show-MsiFailureDetails -ExitCode $repairResult.ExitCode -LogPath $repairResult.LogPath
+                        Write-Warn "Original upgrade log: $installLogPath"
+                        exit $repairResult.ExitCode
+                    }
+
+                    $retryLogPath = Join-Path -Path $env:TEMP -ChildPath "pwsh-upstall-$safeTargetVersion-install-retry.log"
+                    Write-Info "Installer cache rebuilt; retrying PowerShell $targetVersion..."
+                    $proc = Invoke-MsiExec -Arguments $msiArgs -LogPath $retryLogPath
+                    if (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode)
+                    {
+                        Remove-Item -Force $installLogPath, $repairResult.LogPath, $retryLogPath -ErrorAction SilentlyContinue
+                    }
+                    else
+                    {
+                        Show-MsiFailureDetails -ExitCode $proc.ExitCode -LogPath $retryLogPath
+                        Write-Warn "Original upgrade log: $installLogPath"
+                        Write-Warn "Installer cache repair log: $($repairResult.LogPath)"
+                        exit $proc.ExitCode
+                    }
+                }
+                elseif (-not (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode))
+                {
+                    Show-MsiFailureDetails -ExitCode $proc.ExitCode -LogPath $installLogPath
+                    exit $proc.ExitCode
+                }
+
+                Remove-Item -Force $installLogPath -ErrorAction SilentlyContinue
+                if ($proc.ExitCode -in @(1641, 3010))
+                {
+                    Write-Warn "PowerShell $targetVersion installed successfully; Windows Installer requested a reboot (exit code $($proc.ExitCode))."
                 }
                 else
                 {
-                    Show-MsiFailureDetails -ExitCode $proc.ExitCode -LogPath $retryLogPath
-                    Write-Warn "Original upgrade log: $installLogPath"
-                    Write-Warn "Installer cache repair log: $($repairResult.LogPath)"
-                    exit $proc.ExitCode
+                    Write-Success "PowerShell $targetVersion installed successfully"
                 }
-            }
-            elseif (-not (Test-MsiSuccessExitCode -ExitCode $proc.ExitCode))
-            {
-                Show-MsiFailureDetails -ExitCode $proc.ExitCode -LogPath $installLogPath
-                exit $proc.ExitCode
-            }
-
-            Remove-Item -Force $installLogPath -ErrorAction SilentlyContinue
-            if ($proc.ExitCode -in @(1641, 3010))
-            {
-                Write-Warn "PowerShell $targetVersion installed successfully; Windows Installer requested a reboot (exit code $($proc.ExitCode))."
-            }
-            else
-            {
-                Write-Success "PowerShell $targetVersion installed successfully"
             }
         }
     }

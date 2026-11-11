@@ -10,7 +10,7 @@ Install, update, check, or uninstall PowerShell Core on Windows, macOS, and Linu
 | macOS    | [`pwsh-upstall-macos.sh`](./pwsh-upstall-macos.sh)       | Apple Silicon and Intel        |
 | Linux    | [`pwsh-upstall-linux.sh`](./pwsh-upstall-linux.sh)       | x64/arm64, glibc/musl (Alpine) |
 
-> macOS/Linux upgrades always remove the previously installed version. Windows MSI upgrades replace the previous stable MSI version in place.
+> macOS/Linux upgrades always remove the previously installed version. On Windows, PowerShell 7.6.x and earlier are installed from the MSI, which replaces the previous stable MSI version in place. PowerShell 7.7 and later ship no MSI, so they are installed from the official ZIP package; see [Windows install method](#windows-install-method).
 
 ![Checks if PowerShell is up to date](screenshot.png "Checks if PowerShell is up to date")
 
@@ -48,6 +48,27 @@ These one-liners install or update to the latest stable release.
 irm 'https://raw.githubusercontent.com/jonlabelle/pwsh-upstall/refs/heads/main/pwsh-upstall-windows.ps1' |
     powershell -NoProfile -ExecutionPolicy Bypass -
 ```
+
+<details>
+<summary>Windows Install Method</summary>
+
+Starting with PowerShell 7.7, Microsoft [no longer publishes MSI packages](https://devblogs.microsoft.com/powershell/powershell-msi-deprecation/). The Windows script picks the package for the selected release:
+
+| Release           | Package                      | Install location                      |
+| ----------------- | ---------------------------- | ------------------------------------- |
+| 7.6.x and earlier | `PowerShell-<ver>-win-*.msi` | `%ProgramFiles%\PowerShell\7` (MSI)   |
+| 7.7 and later     | `PowerShell-<ver>-win-*.zip` | `%ProgramFiles%\PowerShell\7` (ZIP)   |
+| Prereleases (ZIP) | `PowerShell-<ver>-win-*.zip` | `%ProgramFiles%\PowerShell\7-preview` |
+
+For ZIP-based installs, the script:
+
+- Removes an existing PowerShell MSI installation for the same location first (for example, when upgrading from 7.6.x to 7.7).
+- Extracts the verified ZIP package and adds the install directory to the machine `PATH`. Open a new terminal afterward to pick up the change.
+- Records the install under `HKLM\SOFTWARE\pwsh-upstall` so `-Uninstall` can remove it. ZIP installs do not appear in **Installed apps**.
+
+The MSIX package is not used because it installs per user and does not yet support scenarios such as remoting or running from system services like Task Scheduler.
+
+</details>
 
 ### macOS
 
@@ -208,7 +229,7 @@ sh ./pwsh-upstall-linux.sh
 - **Checksum failed**: Retry the download. Use `--skip-checksum` only if you trust the source and accept the risk.
 - **Insufficient disk space**: Free at least 500 MB and rerun the script.
 - **Permission denied**: Run with `sudo` on Linux/macOS or as Administrator on Windows.
-- **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead.
+- **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead. ZIP-based installs (7.7+) stop with a list of processes running from the install directory; close them and rerun.
 - **Windows Installer errors 1603/1612**: A missing cached MSI can make an upgrade return 1603 while removing the old release or make uninstall return 1612. The Windows script detects this condition, downloads and verifies the installed release's MSI, rebuilds the installer cache, and retries. Other MSI failures retain a verbose log under `%TEMP%\pwsh-upstall-*.log`.
 - **Windows options with one-liners**: Download the script and run it with `powershell -File .\pwsh-upstall-windows.ps1 ...`.
 
