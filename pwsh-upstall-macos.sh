@@ -104,14 +104,14 @@ fi
 cleanup_on_error() {
   if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
     log "Cleaning up temporary files due to error..."
-    rm -rf "${TMP_DIR}" 2>/dev/null || true
+    rm -rf "${TMP_DIR}" 2> /dev/null || true
   fi
 }
 
 trap cleanup_on_error EXIT INT TERM
 
 usage() {
-  cat <<'USAGE'
+  cat << 'USAGE'
 Usage:
   pwsh-upstall-macos.sh [options]
 
@@ -176,7 +176,7 @@ run() {
 }
 
 need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
+  command -v "$1" > /dev/null 2>&1 || {
     log_error "ERROR: missing required command: $1"
 
     # Suggest installation command based on available package manager
@@ -185,24 +185,24 @@ need_cmd() {
 
     # Map command names to common package names
     case "${cmd}" in
-    shasum)
-      echo "Note: shasum is typically included with macOS by default" >&2
-      ;;
-    python3)
-      if command -v brew >/dev/null 2>&1; then
-        echo "Try: brew install python3" >&2
-      else
-        echo "Try: Install Xcode Command Line Tools with 'xcode-select --install'" >&2
-        echo "Or install Homebrew from https://brew.sh and run: brew install python3" >&2
-      fi
-      ;;
-    *)
-      if command -v brew >/dev/null 2>&1; then
-        echo "Try: brew install ${pkg}" >&2
-      else
-        echo "Tip: Install Homebrew from https://brew.sh" >&2
-      fi
-      ;;
+      shasum)
+        echo "Note: shasum is typically included with macOS by default" >&2
+        ;;
+      python3)
+        if command -v brew > /dev/null 2>&1; then
+          echo "Try: brew install python3" >&2
+        else
+          echo "Try: Install Xcode Command Line Tools with 'xcode-select --install'" >&2
+          echo "Or install Homebrew from https://brew.sh and run: brew install python3" >&2
+        fi
+        ;;
+      *)
+        if command -v brew > /dev/null 2>&1; then
+          echo "Try: brew install ${pkg}" >&2
+        else
+          echo "Tip: Install Homebrew from https://brew.sh" >&2
+        fi
+        ;;
     esac
 
     exit 1
@@ -219,9 +219,9 @@ check_network() {
   token="$(github_token)"
   local status=""
   if [[ -n "${token}" ]]; then
-    status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${token}" "https://api.github.com" 2>/dev/null || true)"
+    status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${token}" "https://api.github.com" 2> /dev/null || true)"
   else
-    status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "https://api.github.com" 2>/dev/null || true)"
+    status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "https://api.github.com" 2> /dev/null || true)"
   fi
 
   if [[ -z "${status}" || "${status}" == "000" || "${status}" -ge 500 ]]; then
@@ -242,13 +242,13 @@ check_disk_space() {
   local target_dir="${1}"
   local required_mb="${2:-500}"
 
-  if ! command -v df >/dev/null 2>&1; then
+  if ! command -v df > /dev/null 2>&1; then
     log_warn "Warning: 'df' command not found, skipping disk space check"
     return 0
   fi
 
   local available_kb
-  available_kb=$(df -k "${target_dir}" 2>/dev/null | awk 'NR==2 {print $4}')
+  available_kb=$(df -k "${target_dir}" 2> /dev/null | awk 'NR==2 {print $4}')
 
   if [[ -z "${available_kb}" ]]; then
     log_warn "Warning: Could not determine available disk space"
@@ -269,7 +269,7 @@ compare_versions() {
   local v1="${1#v}"
   local v2="${2#v}"
 
-  "${PYTHON}" - "${v1}" "${v2}" <<'PY'
+  "${PYTHON}" - "${v1}" "${v2}" << 'PY'
 import sys
 try:
     from packaging import version
@@ -304,7 +304,7 @@ extract_expected_sha256() {
   local checksum_path="${1}"
   local asset_name="${2}"
 
-  "${PYTHON}" - "${checksum_path}" "${asset_name}" <<'PY'
+  "${PYTHON}" - "${checksum_path}" "${asset_name}" << 'PY'
 import os
 import re
 import sys
@@ -367,7 +367,7 @@ get_release_metadata() {
   fi
 
   # Extract (1) tag_name, (2) matching .pkg download URL, and (3) SHA256 file URL
-  "${PYTHON}" - "${json}" "${target_pkg_suffix}" <<'PY'
+  "${PYTHON}" - "${json}" "${target_pkg_suffix}" << 'PY'
 import json, sys, re
 data = json.loads(sys.argv[1])
 target_suffix = sys.argv[2]
@@ -434,7 +434,7 @@ is_numeric_semver_selector() {
 semver_selector_part_count() {
   local selector="${1#v}"
   selector="${selector#V}"
-  awk -F'.' '{print NF}' <<<"${selector}"
+  awk -F'.' '{print NF}' <<< "${selector}"
 }
 
 get_release_metadata_by_semver_selector() {
@@ -447,9 +447,9 @@ get_release_metadata_by_semver_selector() {
 
   local json_file
   json_file="$(mktemp)"
-  github_api_get "${API_BASE}/releases?per_page=100" >"${json_file}"
+  github_api_get "${API_BASE}/releases?per_page=100" > "${json_file}"
 
-  "${PYTHON}" - "${json_file}" "${target_pkg_suffix}" "${selector_no_v}" <<'PY'
+  "${PYTHON}" - "${json_file}" "${target_pkg_suffix}" "${selector_no_v}" << 'PY'
 import json, re, sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as f:
@@ -546,7 +546,7 @@ resolve_release_metadata() {
   local selector="${1:-}"
   local target_pkg_suffix="${2}"
   local selector_lc
-  selector_lc="$(tr '[:upper:]' '[:lower:]' <<<"${selector}")"
+  selector_lc="$(tr '[:upper:]' '[:lower:]' <<< "${selector}")"
 
   if [[ -z "${selector}" || "${selector_lc}" == "latest" ]]; then
     get_release_metadata "${API_BASE}/releases/latest" "${target_pkg_suffix}"
@@ -673,7 +673,7 @@ check_latest() {
   local target_pkg_suffix="osx-${PKG_ARCH}.pkg"
   local rel_data rel_tag pkg_url pkg_name sha_url
   rel_data="$(resolve_release_metadata "" "${target_pkg_suffix}")"
-  IFS=' ' read -r rel_tag pkg_url pkg_name sha_url <<<"${rel_data}"
+  IFS=' ' read -r rel_tag pkg_url pkg_name sha_url <<< "${rel_data}"
 
   if [[ -z "${pkg_url}" ]]; then
     log_error "ERROR: Could not find an ${target_pkg_suffix} asset in the latest release."
@@ -690,9 +690,9 @@ check_latest() {
   log "Latest package: ${pkg_name}"
 
   local installed_version=""
-  if command -v pwsh >/dev/null 2>&1; then
+  if command -v pwsh > /dev/null 2>&1; then
     # shellcheck disable=SC2016
-    installed_version="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
+    installed_version="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2> /dev/null || true)"
   fi
 
   if [[ -z "${installed_version}" ]]; then
@@ -728,7 +728,7 @@ main_install() {
   local target_pkg_suffix="osx-${PKG_ARCH}.pkg"
   local rel_data rel_tag pkg_url pkg_name sha_url
   rel_data="$(resolve_release_metadata "${TAG}" "${target_pkg_suffix}")"
-  IFS=' ' read -r rel_tag pkg_url pkg_name sha_url <<<"${rel_data}"
+  IFS=' ' read -r rel_tag pkg_url pkg_name sha_url <<< "${rel_data}"
 
   if [[ -z "${pkg_url}" ]]; then
     if [[ -n "${TAG}" ]]; then
@@ -749,9 +749,9 @@ main_install() {
   local version_cmp=0
   local upgrade_from_version=""
 
-  if command -v pwsh >/dev/null 2>&1; then
+  if command -v pwsh > /dev/null 2>&1; then
     # shellcheck disable=SC2016
-    installed_version="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
+    installed_version="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2> /dev/null || true)"
   fi
 
   if [[ -n "${desired_version}" && -n "${installed_version}" ]]; then
@@ -856,7 +856,7 @@ uninstall_pwsh() {
 
   if [[ -L "${pwsh_link}" ]]; then
     local link_target=""
-    link_target="$(readlink "${pwsh_link}" 2>/dev/null || true)"
+    link_target="$(readlink "${pwsh_link}" 2> /dev/null || true)"
     if [[ "${link_target}" == *"microsoft/powershell/"* ]]; then
       log_info "Removing symlink: ${pwsh_link}"
       run sudo rm -f "${pwsh_link}"
@@ -864,7 +864,7 @@ uninstall_pwsh() {
     fi
   fi
 
-  if command -v pkgutil >/dev/null 2>&1; then
+  if command -v pkgutil > /dev/null 2>&1; then
     local pkg_ids=""
     pkg_ids="$(pkgutil --pkgs | grep -i 'powershell' || true)"
     if [[ -n "${pkg_ids}" ]]; then
@@ -872,7 +872,7 @@ uninstall_pwsh() {
         [[ -z "${pkg}" ]] && continue
         log_info "Forgetting package receipt: ${pkg}"
         run sudo pkgutil --forget "${pkg}"
-      done <<<"${pkg_ids}"
+      done <<< "${pkg_ids}"
     fi
   fi
 
@@ -880,8 +880,8 @@ uninstall_pwsh() {
     log "[dry-run] sudo rmdir \"/usr/local/microsoft/powershell\" (ignore failures)"
     log "[dry-run] sudo rmdir \"/usr/local/microsoft\" (ignore failures)"
   else
-    sudo rmdir "/usr/local/microsoft/powershell" 2>/dev/null || true
-    sudo rmdir "/usr/local/microsoft" 2>/dev/null || true
+    sudo rmdir "/usr/local/microsoft/powershell" 2> /dev/null || true
+    sudo rmdir "/usr/local/microsoft" 2> /dev/null || true
   fi
 
   if [[ "${removed_any}" -eq 1 ]]; then
@@ -909,47 +909,47 @@ uninstall_pwsh() {
 # Parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
-  --tag)
-    TAG="${2:-}"
-    shift 2
-    ;;
-  --out-dir)
-    OUT_DIR="${2:-}"
-    shift 2
-    ;;
-  --keep)
-    KEEP=1
-    shift
-    ;;
-  --force)
-    FORCE=1
-    shift
-    ;;
-  --check)
-    CHECK_ONLY=1
-    shift
-    ;;
-  --uninstall)
-    UNINSTALL=1
-    shift
-    ;;
-  --skip-checksum)
-    SKIP_CHECKSUM=1
-    shift
-    ;;
-  -n | --dry-run)
-    DRY_RUN=1
-    shift
-    ;;
-  -h | --help)
-    usage
-    exit 0
-    ;;
-  *)
-    log_error "Unknown argument: $1"
-    usage
-    exit 1
-    ;;
+    --tag)
+      TAG="${2:-}"
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR="${2:-}"
+      shift 2
+      ;;
+    --keep)
+      KEEP=1
+      shift
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    --check)
+      CHECK_ONLY=1
+      shift
+      ;;
+    --uninstall)
+      UNINSTALL=1
+      shift
+      ;;
+    --skip-checksum)
+      SKIP_CHECKSUM=1
+      shift
+      ;;
+    -n | --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      log_error "Unknown argument: $1"
+      usage
+      exit 1
+      ;;
   esac
 done
 
@@ -978,26 +978,26 @@ fi
 
 ARCH="$(uname -m)"
 case "${ARCH}" in
-arm64) PKG_ARCH="arm64" ;;
-x86_64) PKG_ARCH="x64" ;;
-*)
-  log_error "ERROR: Unsupported architecture: ${ARCH} (expected arm64 or x86_64)."
-  exit 1
-  ;;
+  arm64) PKG_ARCH="arm64" ;;
+  x86_64) PKG_ARCH="x64" ;;
+  *)
+    log_error "ERROR: Unsupported architecture: ${ARCH} (expected arm64 or x86_64)."
+    exit 1
+    ;;
 esac
 
 log_info "Detected architecture: ${ARCH} -> selecting macOS ${PKG_ARCH} package"
 
 PYTHON=""
-if command -v python3 >/dev/null 2>&1; then
+if command -v python3 > /dev/null 2>&1; then
   PYTHON="python3"
-elif command -v python >/dev/null 2>&1; then
+elif command -v python > /dev/null 2>&1; then
   PYTHON="python"
 else
   log_error "ERROR: python3 (or python) is required to parse GitHub release JSON."
 
   # Suggest installation method
-  if command -v brew >/dev/null 2>&1; then
+  if command -v brew > /dev/null 2>&1; then
     echo "Try: brew install python3" >&2
   else
     echo "Try one of the following:" >&2

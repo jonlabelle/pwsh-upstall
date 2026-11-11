@@ -102,14 +102,14 @@ fi
 cleanup_on_error() {
   if [ -n "${TMP_DIR}" ] && [ -d "${TMP_DIR}" ]; then
     log "Cleaning up temporary files due to error..."
-    rm -rf "${TMP_DIR}" 2>/dev/null || true
+    rm -rf "${TMP_DIR}" 2> /dev/null || true
   fi
 }
 
 trap cleanup_on_error EXIT INT TERM
 
 usage() {
-  cat <<'USAGE'
+  cat << 'USAGE'
 Usage:
   pwsh-upstall-linux.sh [options]
 
@@ -186,13 +186,13 @@ parse_release_metadata() {
   PKG_NAME=""
   SHA_URL=""
 
-  IFS=' ' read -r REL_TAG PKG_URL PKG_NAME SHA_URL <<EOF
+  IFS=' ' read -r REL_TAG PKG_URL PKG_NAME SHA_URL << EOF
 ${_rel_data}
 EOF
 }
 
 need_cmd() {
-  if ! command -v "${1}" >/dev/null 2>&1; then
+  if ! command -v "${1}" > /dev/null 2>&1; then
     log_error "ERROR: missing required command: ${1}"
 
     # Suggest installation command based on available package manager
@@ -201,22 +201,22 @@ need_cmd() {
 
     # Map command names to common package names
     case "${_cmd}" in
-    sha256sum) _pkg="coreutils" ;;
-    python3) _pkg="python3" ;;
-    *) _pkg="${_cmd}" ;;
+      sha256sum) _pkg="coreutils" ;;
+      python3) _pkg="python3" ;;
+      *) _pkg="${_cmd}" ;;
     esac
 
-    if command -v apt-get >/dev/null 2>&1; then
+    if command -v apt-get > /dev/null 2>&1; then
       echo "Try: sudo apt-get install ${_pkg}" >&2
-    elif command -v dnf >/dev/null 2>&1; then
+    elif command -v dnf > /dev/null 2>&1; then
       echo "Try: sudo dnf install ${_pkg}" >&2
-    elif command -v yum >/dev/null 2>&1; then
+    elif command -v yum > /dev/null 2>&1; then
       echo "Try: sudo yum install ${_pkg}" >&2
-    elif command -v apk >/dev/null 2>&1; then
+    elif command -v apk > /dev/null 2>&1; then
       echo "Try: sudo apk add ${_pkg}" >&2
-    elif command -v zypper >/dev/null 2>&1; then
+    elif command -v zypper > /dev/null 2>&1; then
       echo "Try: sudo zypper install ${_pkg}" >&2
-    elif command -v pacman >/dev/null 2>&1; then
+    elif command -v pacman > /dev/null 2>&1; then
       echo "Try: sudo pacman -S ${_pkg}" >&2
     fi
 
@@ -233,9 +233,9 @@ check_network() {
   _status=""
   _github_token="$(github_token)"
   if [ -n "${_github_token}" ]; then
-    _status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${_github_token}" "https://api.github.com" 2>/dev/null || true)"
+    _status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${_github_token}" "https://api.github.com" 2> /dev/null || true)"
   else
-    _status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "https://api.github.com" 2>/dev/null || true)"
+    _status="$(curl -sSL --connect-timeout 5 --max-time 10 -o /dev/null -w "%{http_code}" "https://api.github.com" 2> /dev/null || true)"
   fi
 
   if [ -z "${_status}" ] || [ "${_status}" = "000" ] || [ "${_status}" -ge 500 ]; then
@@ -256,12 +256,12 @@ check_disk_space() {
   _target_dir="${1}"
   _required_mb="${2:-500}"
 
-  if ! command -v df >/dev/null 2>&1; then
+  if ! command -v df > /dev/null 2>&1; then
     log_warn "Warning: 'df' command not found, skipping disk space check"
     return 0
   fi
 
-  _available_kb=$(df -k "${_target_dir}" 2>/dev/null | awk 'NR==2 {print $4}')
+  _available_kb=$(df -k "${_target_dir}" 2> /dev/null | awk 'NR==2 {print $4}')
 
   if [ -z "${_available_kb}" ]; then
     log_warn "Warning: Could not determine available disk space"
@@ -282,7 +282,7 @@ compare_versions() {
   _v1="${1#v}"
   _v2="${2#v}"
 
-  "${PYTHON}" - "${_v1}" "${_v2}" <<'PY'
+  "${PYTHON}" - "${_v1}" "${_v2}" << 'PY'
 import sys
 try:
     from packaging import version
@@ -317,7 +317,7 @@ extract_expected_sha256() {
   _checksum_path="${1}"
   _asset_name="${2}"
 
-  "${PYTHON}" - "${_checksum_path}" "${_asset_name}" <<'PY'
+  "${PYTHON}" - "${_checksum_path}" "${_asset_name}" << 'PY'
 import os
 import re
 import sys
@@ -378,7 +378,7 @@ get_release_metadata() {
   fi
 
   _rel_data="$(
-    "${PYTHON}" - "${_json}" "${_target_suffix}" <<'PY'
+    "${PYTHON}" - "${_json}" "${_target_suffix}" << 'PY'
 import json, sys, re
 data = json.loads(sys.argv[1])
 target = sys.argv[2]
@@ -456,9 +456,9 @@ get_release_metadata_by_semver_selector() {
   log "Resolving semver selector: ${_selector}" >&2
 
   _json_file="$(mktemp)"
-  github_api_get "${API_BASE}/releases?per_page=100" >"${_json_file}"
+  github_api_get "${API_BASE}/releases?per_page=100" > "${_json_file}"
   _rel_data="$(
-    "${PYTHON}" - "${_json_file}" "${_target_suffix}" "${_selector_no_v}" <<'PY'
+    "${PYTHON}" - "${_json_file}" "${_target_suffix}" "${_selector_no_v}" << 'PY'
 import json, re, sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as f:
@@ -686,9 +686,9 @@ check_latest() {
   log "Latest package: ${PKG_NAME}"
 
   INSTALLED_VERSION=""
-  if command -v pwsh >/dev/null 2>&1; then
+  if command -v pwsh > /dev/null 2>&1; then
     # shellcheck disable=SC2016
-    INSTALLED_VERSION="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
+    INSTALLED_VERSION="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2> /dev/null || true)"
   fi
 
   if [ -z "${INSTALLED_VERSION}" ]; then
@@ -742,9 +742,9 @@ main_install() {
   VERSION_CMP=0
   UPGRADE_FROM_VERSION=""
 
-  if command -v pwsh >/dev/null 2>&1; then
+  if command -v pwsh > /dev/null 2>&1; then
     # shellcheck disable=SC2016
-    INSTALLED_VERSION="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null || true)"
+    INSTALLED_VERSION="$(pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2> /dev/null || true)"
   fi
 
   if [ -n "${DESIRED_VERSION}" ] && [ -n "${INSTALLED_VERSION}" ]; then
@@ -817,47 +817,47 @@ main_install() {
 
 while [ $# -gt 0 ]; do
   case "${1}" in
-  --tag)
-    TAG="${2:-}"
-    shift 2
-    ;;
-  --out-dir)
-    OUT_DIR="${2:-}"
-    shift 2
-    ;;
-  --keep)
-    KEEP=1
-    shift
-    ;;
-  --force)
-    FORCE=1
-    shift
-    ;;
-  --check)
-    CHECK_ONLY=1
-    shift
-    ;;
-  --uninstall)
-    UNINSTALL=1
-    shift
-    ;;
-  --skip-checksum)
-    SKIP_CHECKSUM=1
-    shift
-    ;;
-  -n | --dry-run)
-    DRY_RUN=1
-    shift
-    ;;
-  -h | --help)
-    usage
-    exit 0
-    ;;
-  *)
-    log_error "Unknown argument: ${1}"
-    usage
-    exit 1
-    ;;
+    --tag)
+      TAG="${2:-}"
+      shift 2
+      ;;
+    --out-dir)
+      OUT_DIR="${2:-}"
+      shift 2
+      ;;
+    --keep)
+      KEEP=1
+      shift
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    --check)
+      CHECK_ONLY=1
+      shift
+      ;;
+    --uninstall)
+      UNINSTALL=1
+      shift
+      ;;
+    --skip-checksum)
+      SKIP_CHECKSUM=1
+      shift
+      ;;
+    -n | --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      log_error "Unknown argument: ${1}"
+      usage
+      exit 1
+      ;;
   esac
 done
 
@@ -872,7 +872,7 @@ SUDO=""
 if [ "${CHECK_ONLY}" -eq 0 ]; then
   CURRENT_UID="$(id -u)"
   if [ "${CURRENT_UID}" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1; then
+    if command -v sudo > /dev/null 2>&1; then
       SUDO="sudo"
     else
       if [ "${DRY_RUN}" -eq 1 ]; then
@@ -934,16 +934,16 @@ fi
 
 ARCH="$(uname -m)"
 case "${ARCH}" in
-x86_64) PKG_ARCH="x64" ;;
-aarch64 | arm64) PKG_ARCH="arm64" ;;
-*)
-  log_error "ERROR: Unsupported architecture: ${ARCH} (expected x86_64 or arm64)."
-  exit 1
-  ;;
+  x86_64) PKG_ARCH="x64" ;;
+  aarch64 | arm64) PKG_ARCH="arm64" ;;
+  *)
+    log_error "ERROR: Unsupported architecture: ${ARCH} (expected x86_64 or arm64)."
+    exit 1
+    ;;
 esac
 
 MUSL=0
-if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then
+if command -v ldd > /dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; then
   MUSL=1
 fi
 
@@ -954,25 +954,25 @@ else
 fi
 
 PYTHON=""
-if command -v python3 >/dev/null 2>&1; then
+if command -v python3 > /dev/null 2>&1; then
   PYTHON="python3"
-elif command -v python >/dev/null 2>&1; then
+elif command -v python > /dev/null 2>&1; then
   PYTHON="python"
 else
   log_error "ERROR: python3 (or python) is required to parse GitHub release JSON."
 
   # Suggest installation based on package manager
-  if command -v apt-get >/dev/null 2>&1; then
+  if command -v apt-get > /dev/null 2>&1; then
     echo "Try: sudo apt-get install python3" >&2
-  elif command -v dnf >/dev/null 2>&1; then
+  elif command -v dnf > /dev/null 2>&1; then
     echo "Try: sudo dnf install python3" >&2
-  elif command -v yum >/dev/null 2>&1; then
+  elif command -v yum > /dev/null 2>&1; then
     echo "Try: sudo yum install python3" >&2
-  elif command -v apk >/dev/null 2>&1; then
+  elif command -v apk > /dev/null 2>&1; then
     echo "Try: sudo apk add python3" >&2
-  elif command -v zypper >/dev/null 2>&1; then
+  elif command -v zypper > /dev/null 2>&1; then
     echo "Try: sudo zypper install python3" >&2
-  elif command -v pacman >/dev/null 2>&1; then
+  elif command -v pacman > /dev/null 2>&1; then
     echo "Try: sudo pacman -S python" >&2
   fi
 
