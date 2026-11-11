@@ -557,7 +557,7 @@ function Invoke-PwshUpstallWindows
         $suffixes = @("win-$Arch.msi", "win-$Arch.zip")
         $suffixText = $suffixes -join ' or '
         $selectorText = $SelectorParts -join '.'
-        $releases = @(Invoke-GitHubApi -Url "$apiBase/releases?per_page=100")
+        $releases = Invoke-GitHubApi -Url "$apiBase/releases?per_page=100"
         $matching = @()
 
         foreach ($release in $releases)
@@ -626,7 +626,7 @@ function Invoke-PwshUpstallWindows
             return Invoke-GitHubApi -Url "$apiBase/releases/latest"
         }
 
-        $selectorParts = Get-SemVerSelectorParts -Selector $TagName
+        $selectorParts = @(Get-SemVerSelectorParts -Selector $TagName)
         if ($selectorParts -and ($selectorParts.Count -eq 1 -or $selectorParts.Count -eq 2))
         {
             Write-Verbose "Resolving semver selector: $TagName"

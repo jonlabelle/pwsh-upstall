@@ -219,6 +219,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@main
 
+      - name: Test Windows release selectors
+        shell: powershell
+        run: .\tests\windows-release-selection.ps1
+
       - name: Capture pre-install state
         shell: powershell
         run: |
