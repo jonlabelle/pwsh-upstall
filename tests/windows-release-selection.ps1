@@ -1,3 +1,8 @@
+# Windows PowerShell release selection tests for pwsh-upstall-windows.ps1
+#
+# This file contains automated tests to verify that the release selection logic
+# works correctly for different tags, architectures, and asset types and it is called by the CI workflow.
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -11,16 +16,25 @@ if ($parseErrors.Count -gt 0)
 }
 
 # Load the nested release helpers without invoking the installer.
-foreach ($name in @('Remove-VersionPrefix', 'Invoke-GitHubApi', 'Get-SemVerSelectorParts', 'Get-SemVerRelease', 'Get-Release', 'Select-Asset'))
+foreach ($name in @(
+        'Remove-VersionPrefix',
+        'Invoke-GitHubApi',
+        'Get-SemVerSelectorParts',
+        'Get-SemVerRelease',
+        'Get-Release',
+        'Select-Asset')
+)
 {
     $definition = $ast.Find({
             param($node)
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
         }, $true)
+
     if (-not $definition)
     {
         throw "Function not found: $name"
     }
+
     . ([scriptblock]::Create($definition.Extent.Text))
 }
 
