@@ -229,6 +229,7 @@ sh ./pwsh-upstall-linux.sh
 - **Checksum failed**: Retry the download. Use `--skip-checksum` only if you trust the source and accept the risk.
 - **Insufficient disk space**: Free at least 500 MB and rerun the script.
 - **Permission denied**: Run with `sudo` on Linux/macOS or as Administrator on Windows.
+- **TLS connection errors (Windows)**: The script preserves OS-managed TLS defaults (`SystemDefault`). For explicit protocol lists, it adds TLS 1.2 without removing other versions. Check Windows TLS policy if connections still fail.
 - **Process in use (Windows)**: Exit `pwsh.exe` and run from `powershell.exe` instead. ZIP-based installs (7.7+) stop with a list of processes running from the install directory; close them and rerun.
 - **Windows Installer errors 1603/1612**: A missing cached MSI can make an upgrade return 1603 while removing the old release or make uninstall return 1612. The Windows script detects this condition, downloads and verifies the installed release's MSI, rebuilds the installer cache, and retries. Other MSI failures retain a verbose log under `%TEMP%\pwsh-upstall-*.log`.
 - **Windows options with one-liners**: Download the script and run it with `powershell -File .\pwsh-upstall-windows.ps1 ...`.

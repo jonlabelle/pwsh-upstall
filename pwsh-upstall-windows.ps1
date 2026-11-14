@@ -190,9 +190,15 @@ function Invoke-PwshUpstallWindows
     {
         try
         {
-            $tls12 = [System.Net.SecurityProtocolType]::Tls12
             $currentProtocols = [System.Net.ServicePointManager]::SecurityProtocol
 
+            # Zero means SystemDefault; preserve OS-managed protocol negotiation.
+            if ([int]$currentProtocols -eq 0)
+            {
+                return
+            }
+
+            $tls12 = [System.Net.SecurityProtocolType]::Tls12
             if (($currentProtocols -band $tls12) -ne $tls12)
             {
                 [System.Net.ServicePointManager]::SecurityProtocol = $currentProtocols -bor $tls12
